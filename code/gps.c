@@ -3,16 +3,16 @@
 #include <string.h>
 #include <avr/io.h>
 #include <inttypes.h>
-//#include <avr/eeprom.h>
+#include <avr/eeprom.h>
 //#include <math.h>
 #include <avr/interrupt.h> 
 #include <util/delay.h>
 #include <avr/pgmspace.h>
+#include "font6x8s.h" //defines prog_char Font [256] [6] 
 
-
-#define LCD_SI_PIN  PB2
+#define LCD_SI_PIN  PB1
 #define LCD_SI_PORT 'B' //PORTB
-#define LCD_CK_PIN  PB1
+#define LCD_CK_PIN  PB0
 #define LCD_CK_PORT 'B' //PORTB
 #define LCD_A0_PIN  PE4
 #define LCD_A0_PORT 'E' //PORTE
@@ -23,8 +23,6 @@
 
 #define LCD_PIXEL_BYTES 1024
 
-
-typedef uint8_t lcd_t[LCD_PIXEL_BYTES];
 
 
 char setpin(char port, char pin, char state){
@@ -91,22 +89,31 @@ char setpin(char port, char pin, char state){
     return(0);
     }
 
+uint8_t swap_nibble(uint8_t byte){
+    return((byte << 4) || (byte >> 4));
+    }
+
+void lcd_sel(void){
+    setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
+    setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip
+}
+
+void lcd_des(void){
+    setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip
+    }
 
 void lcd_write(uint8_t byte, uint8_t type){
     char i;
-    setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
+    //setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
+    //setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip, could be moved outside for performance
     setpin(LCD_A0_PORT, LCD_A0_PIN, type); //set A0
-    setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip, could be moved outside for performance
     for (i= 7; i >= 0; i--){
-//    _delay_ms(1);
         setpin(LCD_SI_PORT, LCD_SI_PIN, (byte & (1 << i))); //prepare SI
-//    _delay_ms(1);
         setpin(LCD_CK_PORT, LCD_CK_PIN, 1); //validate SI with rising edge
-//    _delay_ms(1);
         setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
         }
 
-    setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip, could be moved outside for performance
+    //setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip, could be moved outside for performance
     }
 
 void lcd_command(uint8_t byte){
@@ -114,7 +121,7 @@ void lcd_command(uint8_t byte){
     }
 
 void lcd_data(uint8_t byte){
-    lcd_write(byte, 1);
+    lcd_write(byte, 1);//swap_nibble(byte), 1);
     }
 
 
@@ -143,16 +150,18 @@ void lcd_init(void){
     _delay_ms(1);
     setpin(LCD_RS_PORT, LCD_RS_PIN, 1);
     _delay_ms(1);
-	
+    lcd_sel();
     for (i= 0; i < INIT_COM; i++){ //sizeof(init)/sizeof(init[0]) //we'll do this statically for better performance
         lcd_command(init[i]);
         }
+    lcd_des();
     }
 
-void lcd_clear(lcd_t m){
+void lcd_clear(uint8_t* m){
     uint16_t i;
     uint8_t j;
 
+    lcd_sel();
     for (i= 0; i < 8; i++){
         lcd_command(0xB0 + i); //or |? //set page address
         lcd_command(0x10);     //set first column nibble
@@ -163,12 +172,13 @@ void lcd_clear(lcd_t m){
     lcd_command(0xB0);
     lcd_command(0x10);
     lcd_command(0x00);
-    for (i= 0; i < LCD_PIXEL_BYTES; i++)
+    lcd_des();
+    for (i= 0; i < LCD_PIXEL_BYTES; i++) //should this be moved out?
         m[i]= 0;
     }
 
 /*
-char lcd_set_pixel(uint8_t x, uint8_t y, uint8_t on, lcd_t matrix){
+char lcd_set_pixel(uint8_t x, uint8_t y, uint8_t on, uint8_t* matrix){
     uint8_t page, byte;
 
     if (x > 127 || y > 63)
@@ -185,50 +195,80 @@ char lcd_set_pixel(uint8_t x, uint8_t y, uint8_t on, lcd_t matrix){
     }
 */
 
-char lcd_set_pixel(uint8_t x, uint8_t y, uint8_t on, lcd_t m){ 
-    //only sets pixel in matrix use lcd_write_matrix() when all set
+char lcd_set_pixel(uint8_t x, uint8_t y, uint8_t inv, uint8_t* m){ 
+    //only sets pixel in matrix, write matrix when all set
 
     uint16_t i;
 
     if (x > 127 || y > 63)
-        return(1);
+        return(0);
     i= y / 8 * 128 + x; //no cast necessary because y and 8 are integers
-    if (on)
-        m[i]|= 1 << (y % 8);
-    else
+    if (inv)
         m[i]&= ~(1 << (y % 8));
-    return(0);
+    else
+        m[i]|= 1 << (y % 8);
+    return(1);
     }
 
-void lcd_set_abs_pixel(uint16_t i, uint8_t on, lcd_t m){ 
-    //only sets absolut pixel in matrix use lcd_write_matrix() when all set
+void lcd_set_abs_pixel(uint16_t i, uint8_t inv, uint8_t* m){ 
+    //only sets absolut pixel in matrix, write matrix when all set
 
     uint8_t x,y;
 
     x= i % 128;
     y= i / 128;
-    lcd_set_pixel(x, y, on, m);
+    lcd_set_pixel(x, y, inv, m);
     }
 
-void lcd_write_matrix(lcd_t m){
+char lcd_set_byte(uint8_t byte, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t* m){ 
+    //only sets byte in matrix, write matrix when all set
+
+    uint16_t i;
+
+    if (col > 127 || page > 63)
+        return(0);
+    i= page * 128 + col; 
+    if (inv) {
+        if (trans)
+            m[i]&= ~(byte);
+        else 
+            m[i]= ~(byte);
+        }
+    else {
+        if (trans)
+            m[i]|= byte;
+        else 
+            m[i]= byte;
+        }
+    return(1);
+    }
+
+void lcd_write_matrix(uint8_t* m){
     uint16_t i;
     uint8_t page, col;
 
+    lcd_sel();
     for (i= 0; i < LCD_PIXEL_BYTES; i++){
         page= i / 128;
         col=  i % 128;
         lcd_command(0xB0 + page); //or |?//set page address
-        lcd_command(0x10 + ((0xF0 & col) >> 4)); //set first column nibble
-        lcd_command(0x00 + (0x0F & col)); //set second column nibble
-        lcd_data(m[i]);
+        if (!col){ //this needs to be done because col goes up to 131
+            lcd_command(0x10); //set first column nibble
+            lcd_command(0x00); //set second column nibble
+            }
+        //lcd_command(0x10 + ((0xF0 & col) >> 4)); //set first column nibble
+        //lcd_command(0x00 + (0x0F & col)); //set second column nibble
+        lcd_data(m[i]);//this increases col!
         }
+    lcd_des();
     }
 
-uint8_t* lcd_fw_matrix(lcd_t n, lcd_t o){ //lcd_t is a pointer of uint8_t!!! so this is fine;)
+uint8_t* lcd_fw_matrix(uint8_t* n, uint8_t* o){ //uint8_t* is a pointer of uint8_t!!! so this is fine;)
     uint16_t i;
     uint8_t page, col;
 
     //find first col and page with difference and so on...
+    lcd_sel();
     for (i= 0; i < LCD_PIXEL_BYTES; i++){
         if(n[i] != o[i]){
             page= i / 128;
@@ -236,72 +276,129 @@ uint8_t* lcd_fw_matrix(lcd_t n, lcd_t o){ //lcd_t is a pointer of uint8_t!!! so 
             lcd_command(0xB0 + page); //or |?//set page address
             lcd_command(0x10 + ((0xF0 & col) >> 4)); //set first column nibble
             lcd_command(0x00 + (0x0F & col)); //set second column nibble
-            lcd_data(n[i]);
+            lcd_data(n[i]); //implement auto inc useage here!
             o[i]= n[i];
             }
         }    
+    lcd_des();
     return(o);
     }
 
-void lcd_randomize_matrix(lcd_t m){
+uint8_t* lcd_randomize_matrix(uint8_t* m){
     uint16_t i;
     for (i= 0; i < LCD_PIXEL_BYTES; i++)
-        m[i]= rand()/RAND_MAX * 256;
+        m[i]= (uint8_t) (rand() / (double) RAND_MAX * 256);
+    return(m);
+    }
+
+char lcd_putchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t* m){
+//a char within a page, needs a write afterwards! 
+
+    uint8_t width, i;
+
+    if (c < 32 )
+        return(0);
+    width= 127 - col < FONT_WIDTH ? 127 - col : FONT_WIDTH; //check if to draw over the border, for running text;)
+    for (i= 0; i < FONT_WIDTH; i++)
+        lcd_set_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv, trans, m); //_far needed???
+    return(1);
+    }
+
+char lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t* m){//returns displayed chars
+//display a string, needs no write, use' \n'!
+
+    uint8_t i= 0, wrap= 0; //for 6x8 there can be 168 full chars on the display
+
+    while (c[i]) {
+        if (c[i] == '\n'){
+            page++;
+            col= 0;
+            i++;
+            }
+        //more controle keys need to be implemented:(
+
+        if (col > 127 - FONT_WIDTH){//line wrap, only full letters here!
+            col= 0;
+            page++;
+            if (c[i] == ' ')//skip space if line wraped
+                i++;
+            }
+        if (page > 7)
+            break;
+        lcd_putchar(c[i], col, page, inv, trans, m);
+        col+= FONT_WIDTH;
+        i++;
+        }
+    lcd_write_matrix(m);
+    return(i);
+    }
+
+void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a char at x,y
+
     }
 
 int main(void){
     uint8_t x, y, j;
     uint16_t i;
-    lcd_t m, old;
-    uint8_t* o;
+    uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
+    uint8_t *n, *o;
 
+    n= new;
     o= old;
-    DDRB= 0x46;  //0100 0110
+
+    DDRB= 0x43;  //0100 0011
     DDRE= 0x1C;  //0001 1100
 
     lcd_init(); // must be executed at the very beginning!
-    lcd_clear(m);
+    lcd_clear(n);
 
 
 
 
 
-    setpin('B', PB6, 1);//PORTB|= (1 << PB6); //set what to on?
+    //setpin('B', PB6, 1);//PORTB|= (1 << PB6); //set what to on?
     //  for(;;)
     //  lcd_command(0xA5);
     //lcd_data(0xFF);
     //lcd_data(0xFF);
     //lcd_command(0x49);
 
-    lcd_set_pixel(0, 10, 1, m);
+    lcd_set_pixel(0, 10, 1, n);
     x= 0;
     y= 0;
     j= 10;
-    lcd_randomize_matrix(m);
-    lcd_write_matrix(m);
-    _delay_ms(127);
+    n= lcd_randomize_matrix(n);
+    
+    lcd_write_str("Hello World!\n Go, go!\n Juppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, n);
+    lcd_write_matrix(n);
+    _delay_ms(128);
     for(;;){
-/*
-  if (x > 127){
-  x= 0;
-  y++;
-  }
-  if (y > 63)
-  y= 0;
-  lcd_set_pixel(x, y, 1, m);
-*/
-        
-        for(i= 0; i < LCD_PIXEL_BYTES * 8; i++) {
-            lcd_set_abs_pixel(i,1,m);
-            lcd_set_abs_pixel(i-j,0,m);
-            o= lcd_fw_matrix(m,o);
+        /*
+        for(i= 0; i < LCD_PIXEL_BYTES; i++) {//* 8
+            lcd_set_abs_pixel(i,1,n);
+            if (i < j)
+                lcd_set_abs_pixel(LCD_PIXEL_BYTES * 8 - (j - i),0,n);
+            else
+                lcd_set_abs_pixel(i-j,0,n);
+            o= lcd_fw_matrix(n,o);
             //lcd_write_matrix(m);
             //_delay_ms(12);
-            }
         
-        lcd_randomize_matrix(m);
-        lcd_write_matrix(m);
-        _delay_ms(127);
+            lcd_set_byte(0x0F, i, 0, 1, 1, n);
+            }
+        */
+        //lcd_fw_matrix(n, o);
+        lcd_randomize_matrix(n);
+        lcd_write_matrix(n);
+        lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, n);
+        //lcd_write_str("Hello World!", 0, 0, 0, 0, n);
+        //lcd_sel();
+        //lcd_data(0x7F);
+        //lcd_des();
+        _delay_ms(128);
+        _delay_ms(128);
+        _delay_ms(128);
+        _delay_ms(128);
         }
     
     return(0);
