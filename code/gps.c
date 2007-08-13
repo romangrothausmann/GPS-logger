@@ -10,9 +10,9 @@
 #include <avr/pgmspace.h>
 #include "font6x8s.h" //defines prog_char Font [256] [6] 
 
-#define LCD_SI_PIN  PB2
+#define LCD_SI_PIN  PB1
 #define LCD_SI_PORT 'B' //PORTB
-#define LCD_CK_PIN  PB1
+#define LCD_CK_PIN  PB0
 #define LCD_CK_PORT 'B' //PORTB
 #define LCD_A0_PIN  PE4
 #define LCD_A0_PORT 'E' //PORTE
@@ -122,11 +122,8 @@ void lcd_write(uint8_t byte, uint8_t type){
     //setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip, could be moved outside for performance
     setpin(LCD_A0_PORT, LCD_A0_PIN, type); //set A0
     for (i= 7; i >= 0; i--){
-//        _delay_ms(100);
         setpin(LCD_SI_PORT, LCD_SI_PIN, (byte & (1 << i))); //prepare SI
-//        _delay_ms(100);
         setpin(LCD_CK_PORT, LCD_CK_PIN, 1); //validate SI with rising edge
-//        _delay_ms(100);
         setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
         }
 
@@ -390,23 +387,29 @@ void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a c
 
     }
 
-void uart1_init(uint16_t baud){//51 for 9600bps
-    UBRR1H = (unsigned char)(baud>>8);
-    UBRR1L = (unsigned char)baud;
-    UCSR1C|= (3<<UCSZ10);//async, 8N1, see also UCSZn2!
-    UCSR1B|= (1 << RXCIE1)|(1<<RXEN1); //enable recieve interrupt
-    }
-
 void uart0_init(uint16_t baud){//51 for 9600bps
 //    UBRR0H = (unsigned char)(baud >> 8);
 //    UBRR0L = (unsigned char)baud;
-    UBRR0H = UBRR_VAL >> 8;
-    UBRR0L = UBRR_VAL & 0xFF;
+    UBRR0H = baud >> 8;
+    UBRR0L = baud & 0xFF;
     UCSR0C|= (3<<UCSZ00);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
     UCSR0B|= (1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
     }
 
+void uart1_init(uint16_t baud){//51 for 9600bps
+//    UBRR0H = (unsigned char)(baud >> 8);
+//    UBRR0L = (unsigned char)baud;
+    UBRR1H = baud >> 8;
+    UBRR1L = baud & 0xFF;
+    UCSR1C|= (3<<UCSZ10);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
+    UCSR1B|= (1<<RXEN1)|(1<<TXEN1); //enable recieve
+    }
 
+uint8_t uart1_Rx(void){
+    while (!(UCSR1A & (1<<RXC1)))   // warten bis Zeichen verfuegbar
+        ;
+    return UDR1;                   // Zeichen aus UDR an Aufrufer zurueckgeben
+    }
 
 int main(void){
     //uint8_t x, y, j;
@@ -418,7 +421,7 @@ int main(void){
     n= new;
     o= old;
 
-    DDRB= 0x46;  //0100 0110 //lcd on, SI, CK
+    DDRB= 0x43;  //0100 0011 //lcd on, SI, CK
     DDRE= 0x1C;  //0001 1100 //A0, RST, CS
     
     DDRD= 0x80;  //1000 0000 //gps on
@@ -428,15 +431,14 @@ int main(void){
     lcd_init(); // must be executed at the very beginning!
     lcd_clear(n);
 
+    uart0_init(UBRR_VAL);
+    uart1_init(UBRR_VAL);
 
-    //uart0_init(51);
-    //uart1_init(51);
-
-    //while (!(UCSR0A & (1<<UDRE0))) {}
-    //UDR0='H';
+    while (!(UCSR0A & (1<<UDRE0))) {}
+    UDR0='H';
     //setpin('B', PB6, 1);//PORTB|= (1 << PB6); //set backlight on
-    //setpin('D', PD7, 1);//switch on gps
-
+    setpin('D', PD7, 1);//switch on gps
+    _delay_ms(128);
     lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, n);
     lcd_write_matrix(n);
     _delay_ms(128);
@@ -457,9 +459,14 @@ int main(void){
             uart0_rec= 0;
             }
 */
-//        while (!(UCSR0A & (1<<UDRE0))) {}
-//        UDR0='H';
-//    lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, n);
+
+        s[0]=uart1_Rx();
+        s[1]= 0;
+        lcd_write_str(s, 0, 0, 0, 0, n);    
+        //_delay_ms(128);
+
+        while (!(UCSR0A & (1<<UDRE0))) {}
+        UDR0=s[0];
 
         }
     
