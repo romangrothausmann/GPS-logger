@@ -9,19 +9,24 @@
 #include <util/delay.h>
 #include <avr/pgmspace.h>
 #include "font6x8s.h" //defines prog_char Font [256] [6] 
+#include "drehenc.h"  //defines inc_lr, inc_push, pressed
 
-#define LCD_SI_PIN  PB1
-#define LCD_SI_PORT 'B' //PORTB
-#define LCD_CK_PIN  PB0
-#define LCD_CK_PORT 'B' //PORTB
+#define LCD_SI_PIN  PB1   //only used with manual lcd_write
+#define LCD_SI_PORT PORTB //only used with manual lcd_write
+#define LCD_CK_PIN  PB0   //only used with manual lcd_write
+#define LCD_CK_PORT PORTB //only used with manual lcd_write
 #define LCD_A0_PIN  PE4
-#define LCD_A0_PORT 'E' //PORTE
+#define LCD_A0_PORT PORTE
 #define LCD_RS_PIN  PE3
-#define LCD_RS_PORT 'E' //PORTE
+#define LCD_RS_PORT PORTE
 #define LCD_CS_PIN  PE2
-#define LCD_CS_PORT 'E' //PORTE 
-
+#define LCD_CS_PORT PORTE 
 #define LCD_PIXEL_BYTES 1024
+#define lcd_sel() { LCD_CS_PORT&= ~(1 << LCD_CS_PIN); } //select chip
+#define lcd_des() { LCD_CS_PORT|= (1 << LCD_CS_PIN); } //select chip
+
+
+
 #ifndef F_CPU
 #define F_CPU 8000000L    // Systemclock,  L not UL!
 #endif
@@ -39,6 +44,7 @@
 
 volatile uint8_t uart0_byte, uart0_rec, uart1_byte, uart1_rec;
 
+/*#######nice function but probably not optimizeable!!!#########
 char setpin(char port, char pin, char state){
     switch(port){
     case 'a':
@@ -102,21 +108,24 @@ char setpin(char port, char pin, char state){
         }
     return(0);
     }
-
+*/
+/*
 uint8_t swap_nibble(uint8_t byte){
     return((byte << 4) || (byte >> 4));
     }
-
+*/
+/*
 void lcd_sel(void){
-    setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
+//    setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
     setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip
 }
 
 void lcd_des(void){
     setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip
     }
-
-void lcd_write(uint8_t byte, uint8_t type){
+*/
+/*
+void lcd_write(uint8_t byte, uint8_t type){ //manual SPI, slower!
     char i;
     //setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
     //setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip, could be moved outside for performance
@@ -126,16 +135,29 @@ void lcd_write(uint8_t byte, uint8_t type){
         setpin(LCD_CK_PORT, LCD_CK_PIN, 1); //validate SI with rising edge
         setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
         }
-
     //setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip, could be moved outside for performance
     }
+*/
 
-void lcd_command(uint8_t byte){
+void lcd_write(uint8_t byte, uint8_t type){ //for SPI
+
+    if (type) //set A0
+        LCD_A0_PORT|= (1 << LCD_A0_PIN);
+    else
+        LCD_A0_PORT&= ~(1 << LCD_A0_PIN);
+    SPCR|= (1 << SPE) | (1 << MSTR); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
+    SPSR|= (1 << SPI2X); //SCK/2
+    SPDR= byte;
+    }
+
+void lcd_command(uint8_t byte){ //only good if optimizeable!
+
     lcd_write(byte, 0);
     }
 
-void lcd_data(uint8_t byte){
-    lcd_write(byte, 1);//swap_nibble(byte), 1);
+void lcd_data(uint8_t byte){ //only good if optimizeable!
+
+    lcd_write(byte, 1);
     }
 
 
@@ -160,9 +182,9 @@ void lcd_init(void){
         };
     uint8_t i;
 
-    setpin(LCD_RS_PORT, LCD_RS_PIN, 0); //do the resetting first!!!
+    LCD_RS_PORT&= ~(1 << LCD_RS_PIN); //do the resetting first!!!
     _delay_ms(1);
-    setpin(LCD_RS_PORT, LCD_RS_PIN, 1);
+    LCD_RS_PORT|= (1 << LCD_RS_PIN);
     _delay_ms(1);
     lcd_sel();
     for (i= 0; i < INIT_COM; i++){ //sizeof(init)/sizeof(init[0]) //we'll do this statically for better performance
@@ -256,30 +278,27 @@ char lcd_set_byte(uint8_t byte, uint8_t col, uint8_t page, uint8_t inv, uint8_t 
         }
     return(1);
     }
-/*
-char lcd_iset_byte(uint8_t byte, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans){ 
+
+char lcd_iset_byte(uint8_t byte, uint8_t col, uint8_t page, uint8_t inv){ 
     //sets byte instantly on lcd
 
     uint16_t i;
 
+    lcd_sel();
     if (col > 127 || page > 63)
         return(0);
     i= page * 128 + col; 
-    if (inv) {
-        if (trans)
-            m[i]&= ~(byte);
-        else 
-            m[i]= ~(byte);
-        }
-    else {
-        if (trans)
-            m[i]|= byte;
-        else 
-            m[i]= byte;
-        }
+    lcd_command(0xB0 + page); 
+    lcd_command(0x10 + ((0xF0 & col) >> 4)); //set first column nibble
+    lcd_command(0x00 + (0x0F & col)); //set second column nibble
+    if (inv) 
+        lcd_data(~(byte));
+    else 
+        lcd_data(byte);
+    lcd_des();
     return(1);
     }
-*/
+
 void lcd_write_matrix(uint8_t* m){
     uint16_t i;
     uint8_t page, col;
@@ -340,8 +359,8 @@ char lcd_putchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv, uint8_t tran
         lcd_set_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv, trans, m); //_far needed???
     return(1);
     }
-/*
-char lcd_iputchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans){
+
+char lcd_iputchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv){
 //puts char instantly on lcd
 
     uint8_t width, i;
@@ -350,37 +369,43 @@ char lcd_iputchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv, uint8_t tra
         return(0);
     width= 127 - col < FONT_WIDTH ? 127 - col : FONT_WIDTH; //check if to draw over the border, for running text;)
     for (i= 0; i < FONT_WIDTH; i++)
-        lcd_set_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv, trans, m); //_far needed???
+        lcd_iset_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv); //_far needed???
     return(1);
     }
-*/
-char lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t* m){//returns displayed chars
+
+uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t clear, uint8_t* m){//returns displayed chars
 //display a string, needs no write, use' \n'!
 
-    uint8_t i= 0; //for 6x8 there can be 168 full chars on the display
+    char* oc;
+    oc= c; //for 6x8 there can be 168 full chars on the display
 
-    while (c[i]) {
-        if (c[i] == '\n'){
+    while (*oc) {
+        if (*oc == '\n'){
             page++;
             col= 0;
-            i++;
+            oc++;
             }
         //more controle keys need to be implemented:(
 
         if (col > 127 - FONT_WIDTH){//line wrap, only full letters here!
             col= 0;
             page++;
-            if (c[i] == ' ')//skip space if line wraped
-                i++;
+            if (*oc == ' ')//skip space if line wraped
+                oc++;
             }
         if (page > 7)
             break;
-        lcd_putchar(c[i], col, page, inv, trans, m);
+        lcd_putchar(*oc, col, page, inv, trans, m);
         col+= FONT_WIDTH;
-        i++;
+        oc++;
         }
+    if(clear)
+        while (col < 127){
+            lcd_set_byte(0, col, page, inv, 0, m);
+            col++;
+            }
     lcd_write_matrix(m);
-    return(i);
+    return((oc - c));
     }
 
 void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a char at x,y
@@ -393,7 +418,7 @@ void uart0_init(uint16_t baud){//51 for 9600bps
     UBRR0H = baud >> 8;
     UBRR0L = baud & 0xFF;
     UCSR0C|= (3<<UCSZ00);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
-    UCSR0B|= (1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
+    UCSR0B|=  (1<<RXCIE0)|(1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
     }
 
 void uart1_init(uint16_t baud){//51 for 9600bps
@@ -402,7 +427,13 @@ void uart1_init(uint16_t baud){//51 for 9600bps
     UBRR1H = baud >> 8;
     UBRR1L = baud & 0xFF;
     UCSR1C|= (3<<UCSZ10);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
-    UCSR1B|= (1<<RXEN1)|(1<<TXEN1); //enable recieve
+    UCSR1B|= (1<<RXCIE1)|(1<<RXEN1)|(1<<TXEN1); //enable recieve interrupt
+    }
+
+uint8_t uart0_Rx(void){
+    while (!(UCSR0A & (1<<RXC0)))   // warten bis Zeichen verfuegbar
+        ;
+    return UDR0;                   // Zeichen aus UDR an Aufrufer zurueckgeben
     }
 
 uint8_t uart1_Rx(void){
@@ -412,11 +443,11 @@ uint8_t uart1_Rx(void){
     }
 
 int main(void){
-    //uint8_t x, y, j;
-    //uint16_t i;
+    uint8_t j= 0;
+    uint16_t i;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t *n, *o;
-    char s[2];
+    char gps_s[80], s[5];
 
     n= new;
     o= old;
@@ -426,7 +457,8 @@ int main(void){
     
     DDRD= 0x80;  //1000 0000 //gps on
 
-
+    DDRD &= ~(7 << PD4);//set to input
+    PORTD|= (7 << PD4); //swith on pull-up 
 
     lcd_init(); // must be executed at the very beginning!
     lcd_clear(n);
@@ -434,51 +466,92 @@ int main(void){
     uart0_init(UBRR_VAL);
     uart1_init(UBRR_VAL);
 
-    while (!(UCSR0A & (1<<UDRE0))) {}
-    UDR0='H';
+    dreh_init(); //uses timer2; inc_push, inc_lr, pressed
+
+    sei();
+
+//    while (!(UCSR0A & (1<<UDRE0))) {}
+//    UDR0='H';
     //setpin('B', PB6, 1);//PORTB|= (1 << PB6); //set backlight on
-    setpin('D', PD7, 1);//switch on gps
+    PORTD|= (1 << PD7);//switch on gps
     _delay_ms(128);
-    lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, n);
+    lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, 0, n);
     lcd_write_matrix(n);
     _delay_ms(128);
     for(;;){
-/*
+
+        //interrupt gps
+        /*
         if(uart1_rec){
-            s[0]=uart1_byte;
-            s[1]= 0;
-            lcd_write_str(s, 0, 0, 0, 0, n);
+            while (!(UCSR0A & (1<<UDRE0))) {}
+            cli();
+            UDR0=uart1_byte;
+            while(!(UCSR0A & (1<<TXC0))) {}
+            sei();
+            if (uart1_byte == '\r'){ //end
+                gps_s[j]= 0;
+                //gps_com= 1;
+                j= 0;    
+                for (i= 0; i < LCD_PIXEL_BYTES; i++) 
+                    n[i]= 0;
+                cli();
+                lcd_write_str(gps_s, 0, 0, 0, 0, n);
+                sei();
+                }
+            else{
+                gps_s[j]=uart1_byte;
+                j++;
+                }
+
+            if(j > 80){
+                lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, n);
+                j= 0;
+                }
+
             uart1_rec= 0;
             }
+        */
+        if (inc_push){
+            lcd_write_str("Encoder pressed! ", 0, 0, 0, 0, 1, n);
+            lcd_write_str(itoa(inc_lr, s, 10), 0, 6, 0, 0, 1, n);
+            inc_push= 0;
+            }
+        if(pressed)
+            PORTB|= (1 << PB6);//set backlight on
+        else
+            PORTB&= ~(1 << PB6);//set backlight off
+//        lcd_iputchar('R', 0, 6, 0);
+//        lcd_iputchar(uart0_Rx(), 0, 6, 0);
+/*
+  if(uart0_rec){
+  lcd_iputchar(uart0_byte, 10, 6, 0);
+  uart0_rec= 0;
+  }
+*/
+        //lcd_write_str(s, 0, 0, 0, 0, n);
+
+
+/*
+//polling gps
+s[0]=uart1_Rx();
+s[1]= 0;
+lcd_write_str(s, 0, 0, 0, 0, n);    
 */
 /*
-        if(uart0_rec){
-            s[0]=uart0_byte;
-            s[1]= 0;
-            lcd_write_str(s, 0, 0, 0, 0, n);
-            uart0_rec= 0;
-            }
+  while (!(UCSR0A & (1<<UDRE0))) {}
+  UDR0=gps_s[0];
 */
-
-        s[0]=uart1_Rx();
-        s[1]= 0;
-        lcd_write_str(s, 0, 0, 0, 0, n);    
-        //_delay_ms(128);
-
-        while (!(UCSR0A & (1<<UDRE0))) {}
-        UDR0=s[0];
-
         }
     
     return(0);
     }
 
-/*
+
 ISR(USART0_RX_vect){
     uart0_byte= UDR0;
     uart0_rec= 1;
     }
-*/
+
 ISR(USART1_RX_vect){
     uart1_byte= UDR1;
     uart1_rec= 1;
