@@ -23,7 +23,7 @@
 #define LCD_CS_PORT PORTE 
 #define LCD_PIXEL_BYTES 1024
 #define lcd_sel() { LCD_CS_PORT&= ~(1 << LCD_CS_PIN); } //select chip
-#define lcd_des() { LCD_CS_PORT|= (1 << LCD_CS_PIN); } //select chip
+#define lcd_des() { LCD_CS_PORT|=  (1 << LCD_CS_PIN); } //deselect chip
 
 
 
@@ -125,10 +125,10 @@ void lcd_des(void){
     }
 */
 
-void lcd_write(uint8_t byte, uint8_t type){ //manual SPI, slower!
+void lcd_write(uint8_t byte, uint8_t type){ 
+//manual SPI, slower! DON'T forget to set DDRB, DDRE!!!
+
     char i;
-    //setpin(LCD_CK_PORT, LCD_CK_PIN, 0);
-    //setpin(LCD_CS_PORT, LCD_CS_PIN, 0); //select chip, could be moved outside for performance
     if (type)
         LCD_A0_PORT|= (1 << LCD_A0_PIN); //set A0
     else
@@ -141,19 +141,22 @@ void lcd_write(uint8_t byte, uint8_t type){ //manual SPI, slower!
         LCD_CK_PORT|= (1 << LCD_CK_PIN); //validate SI with rising edge
         LCD_CK_PORT&= ~(1  << LCD_CK_PIN);
         }
-    //setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip, could be moved outside for performance
     }
 
 /*
-void lcd_write(uint8_t byte, uint8_t type){ //for SPI
+void lcd_write(uint8_t byte, uint8_t type){
+ //for internal SPI
 
+    //LCD_CS_PORT&= ~(1 << LCD_CS_PIN);
     if (type) //set A0
-        LCD_A0_PORT|= (1 << LCD_A0_PIN);
+        LCD_A0_PORT|=  (1 << LCD_A0_PIN);
     else
         LCD_A0_PORT&= ~(1 << LCD_A0_PIN);
-    SPCR|= (1 << SPE) | (1 << MSTR); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
-    SPSR|= (1 << SPI2X); //SCK/2
+    //SPCR= 0x53; //0101 0011
+    SPCR|= (1 << SPE) | (1 << MSTR) | (1 << CPHA) | (1 << CPOL) | (3 << SPR0); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
+//    SPSR|= (1 << SPI2X); //SCK/2
     SPDR= byte;
+    //LCD_CS_PORT|=  (1 << LCD_CS_PIN);
     }
 */
 void lcd_command(uint8_t byte){ //only good if optimizeable!
@@ -190,7 +193,7 @@ void lcd_init(void){
 
     LCD_RS_PORT&= ~(1 << LCD_RS_PIN); //do the resetting first!!!
     _delay_ms(1);
-    LCD_RS_PORT|= (1 << LCD_RS_PIN);
+    LCD_RS_PORT|=  (1 << LCD_RS_PIN);
     _delay_ms(1);
     lcd_sel();
     for (i= 0; i < INIT_COM; i++){ //sizeof(init)/sizeof(init[0]) //we'll do this statically for better performance
@@ -406,7 +409,7 @@ uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t t
         oc++;
         }
     if(clear)
-        while (col < 127){
+        while (col < 128){
             lcd_set_byte(0, col, page, inv, 0, m);
             col++;
             }
@@ -458,13 +461,15 @@ int main(void){
     n= new;
     o= old;
 
-    DDRB= 0x46;  //0100 0011 //lcd on, SI, CK
+    DDRB= 0x47; //6;  //0100 0110 //lcd on, SI, CK, SS
     DDRE= 0x1C;  //0001 1100 //A0, RST, CS
     
     DDRD= 0x80;  //1000 0000 //gps on
 
-    DDRD &= ~(7 << PD4);//set to input
-    PORTD|= (7 << PD4); //swith on pull-up 
+    //DDRD &= ~(7 << PD4);//set to input for encoder
+    
+    //PORTD&= ~(1 << PB0); //SS
+    PORTD|=  (7 << PD4); //swith on pull-up 
 
     lcd_init(); // must be executed at the very beginning!
     lcd_clear(n);
@@ -485,6 +490,7 @@ int main(void){
     lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, 0, n);
     lcd_write_matrix(n);
     _delay_ms(128);
+    lcd_iputchar('R', 0, 6, 0);
     for(;;){
 
         //interrupt gps
