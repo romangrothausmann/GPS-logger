@@ -1,0 +1,8 @@
+file=gps_disp_t09; avr-gcc -O2 -g -mmcu=atmega128 -Wall -Wstrict-prototypes -mcall-prologues -DF_CPU=8000000L -c $file.c && avr-gcc -g -mmcu=atmega128 -Wall -Wstrict-prototypes -mcall-prologues -o $file.out $file.o && avr-objcopy -R .eeprom -O ihex $file.out $file.hex && avrdude -p m128 -P usb -c dragon_isp -e -U flash:w:$file.hex
+
+
+file=gps_disp_t09; avr-gcc -O2 -g -mmcu=atmega128 -Wall -Wstrict-prototypes -mcall-prologues -DF_CPU=8000000L -c $file.c && avr-gcc -g -mmcu=atmega128 -Wall -Wstrict-prototypes -mcall-prologues -o $file.out $file.o && avr-objcopy -R .eeprom -O ihex $file.out $file.hex && avrdude -p m128 -c stk200 -e -U flash:w:$file.hex
+
+uisp  -dprog=stk200 -v=3 --hash=32 --verify --upload if=$file.hex
+
+
