@@ -10,6 +10,13 @@
 #include <avr/pgmspace.h>
 #include "font6x8s.h" //defines prog_char Font [256] [6] 
 #include "drehenc.h"  //defines inc_lr, inc_push, pressed
+/*
+#include "dos.h"
+#include "fat.h"
+#include "mmc_spi.h"
+#include "dir.h"
+*/
+
 
 #define LCD_SI_PIN  PB2   //only used with manual lcd_write
 #define LCD_SI_PORT PORTB //only used with manual lcd_write
@@ -25,6 +32,8 @@
 #define lcd_sel() { LCD_CS_PORT&= ~(1 << LCD_CS_PIN); } //select chip
 #define lcd_des() { LCD_CS_PORT|=  (1 << LCD_CS_PIN); } //deselect chip
 
+#define sbi(portn, bitn) asm volatile("sbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
+#define cbi(portn, bitn) asm volatile("cbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
 
 
 #ifndef F_CPU
@@ -42,7 +51,16 @@
   #error Systematic error: baudrate error > 1% and there for too high! Check if F_CPU is without U! 
 #endif
 
-volatile uint8_t uart0_byte, uart0_rec, uart1_byte, uart1_rec;
+#define U_RINGBUF_SIZE 2048 //1024
+
+
+typedef struct {
+    char* time,* lat1,* lat2,* lon1,* lon2,* fix,* nsat,* HDOP,* alt,* geoid;
+    } gps_t;
+
+volatile uint8_t uart0_byte, uart0_rec, uart1_rec, u1_ringbuf_index;
+volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
+uint8_t u1_ringbuf_last_read;
 
 /*#######nice function but probably not optimizeable!!!#########
 char setpin(char port, char pin, char state){
@@ -417,6 +435,40 @@ uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t t
     return((oc - c));
     }
 
+uint8_t lcd_iwrite_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t clear ){//returns next col [//returns displayed chars]
+//display a string, needs no write, use' \n'!
+
+    char* oc;
+    oc= c; //for 6x8 there can be 168 full chars on the display
+
+    while (*oc) {
+        if (*oc == '\n'){
+            page++;
+            col= 0;
+            oc++;
+            }
+        //more controle keys need to be implemented:(
+
+        if (col > 127 - FONT_WIDTH){//line wrap, only full letters here!
+            col= 0;
+            page++;
+            if (*oc == ' ')//skip space if line wraped
+                oc++;
+            }
+        if (page > 7)
+            break;
+        lcd_iputchar(*oc, col, page, inv);
+        col+= FONT_WIDTH;
+        oc++;
+        }
+    if(clear)
+        while (col < 128){
+            lcd_iset_byte(0, col, page, inv);
+            col++;
+            }
+    return(col);//(oc - c);
+    }
+
 void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a char at x,y
 
     }
@@ -428,6 +480,8 @@ void uart0_init(uint16_t baud){//51 for 9600bps
     UBRR0L = baud & 0xFF;
     UCSR0C|= (3<<UCSZ00);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
     UCSR0B|=  (1<<RXCIE0)|(1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
+
+
     }
 
 void uart1_init(uint16_t baud){//51 for 9600bps
@@ -437,6 +491,11 @@ void uart1_init(uint16_t baud){//51 for 9600bps
     UBRR1L = baud & 0xFF;
     UCSR1C|= (3<<UCSZ10);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
     UCSR1B|= (1<<RXCIE1)|(1<<RXEN1)|(1<<TXEN1); //enable recieve interrupt
+
+    u1_ringbuf_last_read= 0;
+//    u1_ringbuf_finished= 0;
+    u1_ringbuf_index= 0; //start on 1! 0 means round done! NO! index can change before buf got processed!
+    uart1_rec= 0; //this counts how many chars are unread of the buffer!
     }
 
 uint8_t uart0_Rx(void){
@@ -451,12 +510,183 @@ uint8_t uart1_Rx(void){
     return UDR1;                   // Zeichen aus UDR an Aufrufer zurueckgeben
     }
 
+char uart1_getchar(){
+
+    uart1_rec--; //check before uart1_getchar() if uart1_rec > 0 !!!
+    if (u1_ringbuf_last_read > U_RINGBUF_SIZE - 2)
+        u1_ringbuf_last_read= 0;
+    return(u1_ringbuf[u1_ringbuf_last_read++]);
+    //return(u1_ringbuf_finished || u1_ringbuf_last_read < u1_ringbuf_index ? u1_ringbuf[u1_ringbuf_last_read++] : 0);
+    }
+
+void uart0_write_str(char* s){
+    while(*s){
+        while (!(UCSR0A & (1<<UDRE0))) {}
+        UDR0=*s;
+        s++;
+        }
+    while (!(UCSR0A & (1<<UDRE0))) {}
+    UDR0='\r';
+//    while (!(UCSR0A & (1<<UDRE0))) {}
+//    UDR0='\n';
+    while(!(UCSR0A & (1<<TXC0))) {}        
+    }
+
+char gps_process_gga(char* s, gps_t* gps_data){
+//retruns number of successfully read fields
+//only valid if 10 is returned!
+
+    char* t;
+
+    if(!(t= strchr(s, ',')))
+        return(0);
+    s= gps_data->time= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(1);
+    s= gps_data->lat1= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(2);
+    s= gps_data->lat2= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(3);
+    s= gps_data->lon1= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(4);
+    s= gps_data->lon2= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(5);
+    s= gps_data->fix= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(6);
+    s= gps_data->nsat= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(7);
+    s= gps_data->HDOP= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(8);
+    s= gps_data->alt= t + 1;
+    if(!(t= strchr(s, ',')))
+        return(9);
+    s= gps_data->geoid= t + 1;
+    return(10); 
+    //check hash
+    }
+
+void gps_process(char* s, gps_t* gps_data){
+
+    if(!strncmp(s, "GPGGA", 5))
+        gps_process_gga(s, gps_data);
+/*    else if(!strncmp(s, "GPRMC", 5))
+        gps_process_rmc(s);
+    else if(!strncmp(s, "GPGSA", 5))
+        gps_process_gsa(s);
+*/
+    }
+
+void display_time(char* time, uint8_t col, uint8_t page){
+    char* s;
+
+    s= time;
+    col+= lcd_iwrite_str("UTC: ", col, page, 0, 0);
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(':', col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(':', col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    }
+
+void display_lat(char* lat1, char* lat2, uint8_t col, uint8_t page){
+    char* s;
+    int sec;
+
+    s= lat1;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar('°', col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar('\'', col, page, 0);
+    col+= FONT_WIDTH;
+    s++;//skip decimal point
+    sec= atoi(s);
+    itoa(sec * 60, s, 10);
+    col+= lcd_iwrite_str(s, col, page, 0, 0);
+    lcd_iputchar('"', col, page, 0);
+    lcd_iputchar(lat2, col, page, 0);
+    }
+
+void display_lon(char* lon1, char* lon2, uint8_t col, uint8_t page){
+    char* s;
+    int sec;
+
+    s= lon1;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar('°', col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar(*s++, col, page, 0);
+    col+= FONT_WIDTH;
+    lcd_iputchar('\'', col, page, 0);
+    col+= FONT_WIDTH;
+    s++;//skip decimal point
+    sec= atoi(s);
+    itoa(sec * 60, s, 10);
+    col+= lcd_iwrite_str(s, col, page, 0, 0);
+    lcd_iputchar('"', col, page, 0);
+    lcd_iputchar(lon2, col, page, 0);
+    }
+
+void display_gga(gps_t* gps_data){
+    if(gps_data->time)
+        display_time(gps_data->time, 0, 0);
+    if(gps_data->lat1 && gps_data->lat2)
+        display_lat(gps_data->lat1, gps_data->lat2, 0, 1);
+    if(gps_data->lon1 && gps_data->lon2)
+        display_lon(gps_data->lon1, gps_data->lon2, 0, 2);
+
+    }
+
+void init_gps_data(gps_t* gps_data){
+    gps_data->time= 0;
+    gps_data->lat1= 0;
+    gps_data->lat2= 0;
+    gps_data->lon1= 0;
+    gps_data->lon2= 0;
+    gps_data->fix= 0;
+    gps_data->nsat= 0;
+    gps_data->HDOP= 0;
+    gps_data->alt= 0;
+    gps_data->geoid= 0;
+    }
+
 int main(void){
-    uint8_t j= 0;
-    uint16_t i;
+    uint8_t j= 0, lcd_on= 0;
+    uint16_t i, last_lr, col;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t *n, *o;
-    char gps_s[80], s[5];
+    char gps_s[80], s[5], c;
+    gps_t gps_data;
 
     n= new;
     o= old;
@@ -479,11 +709,16 @@ int main(void){
 
     dreh_init(); //uses timer2; inc_push, inc_lr, pressed
 
+    init_gps_data(&gps_data);
+/* 
+   lcd_des();
+    MMC_IO_Init();
+*/
     sei();
 
 //    while (!(UCSR0A & (1<<UDRE0))) {}
 //    UDR0='H';
-    //setpin('B', PB6, 1);//PORTB|= (1 << PB6); //set backlight on
+    PORTB|= (1 << PB6); //set backlight on
     PORTD|= (1 << PD7);//switch on gps
     _delay_ms(128);
     lcd_randomize_matrix(n);
@@ -492,47 +727,81 @@ int main(void){
     _delay_ms(128);
     lcd_iputchar('R', 0, 6, 0);
     for(;;){
-
+/*
+        lcd_des();
+        if(GetDriveInformation()!=F_OK){ // get drive parameters
+            lcd_write_str("Drive Info not OK! ", 0, 0, 1, 0, 1, n);
+            }
+        else
+            lcd_write_str("Drive Info OK! ", 0, 0, 1, 0, 1, n);
+*/
         //interrupt gps
-        /*
+        
         if(uart1_rec){
+            /*
             while (!(UCSR0A & (1<<UDRE0))) {}
             cli();
             UDR0=uart1_byte;
             while(!(UCSR0A & (1<<TXC0))) {}
             sei();
-            if (uart1_byte == '\r'){ //end
+            */
+            c= uart1_getchar();
+            if (c == '\r'){ //end
                 gps_s[j]= 0;
                 //gps_com= 1;
                 j= 0;    
-                for (i= 0; i < LCD_PIXEL_BYTES; i++) 
-                    n[i]= 0;
-                cli();
-                lcd_write_str(gps_s, 0, 0, 0, 0, n);
-                sei();
+                //for (i= 0; i < LCD_PIXEL_BYTES; i++) //clear matrix
+                //    n[i]= 0;
+//                cli();
+//                lcd_iwrite_str(gps_s, 0, 3, 0, 0);
+                uart0_write_str(gps_s);
+
+                if(*gps_s == '$'){
+                    //cli();
+                    gps_process(gps_s + 1,&gps_data);
+                    display_gga(&gps_data);
+                    //sei();
+                    }
+
+//                sei();
                 }
             else{
-                gps_s[j]=uart1_byte;
+                gps_s[j]=c;
                 j++;
                 }
 
             if(j > 80){
-                lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, n);
+                lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, 0, n);
                 j= 0;
                 }
-
-            uart1_rec= 0;
             }
-        */
+        
         if (inc_push){
-            lcd_write_str("Encoder pressed! ", 0, 0, 0, 0, 1, n);
-            lcd_write_str(itoa(inc_lr, s, 10), 0, 6, 0, 0, 1, n);
+            //lcd_write_str("Encoder pressed! ", 0, 0, 0, 0, 1, n);
+            //lcd_iwrite_str(itoa(inc_lr, s, 10), 0, 6, 0, 1);
             inc_push= 0;
+            lcd_on= !lcd_on;
+            if (lcd_on)
+                PORTB&= ~(1 << PB6);//set backlight off
+            else
+                PORTB|= (1 << PB6);//set backlight on
+            gps_process("GPGGA,201835.00,,,,,0,00,99.99,,,,,,*6B", &gps_data);
+            display_gga(&gps_data);
+            col= lcd_iwrite_str("UTC: ", 0, 6, 0, 0);
+            lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             }
+        if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
+            //cli();
+            lcd_iwrite_str(itoa(inc_lr, s, 10), 0, 7, 0, 1);
+            //sei();
+            last_lr= inc_lr;
+            }
+/*
         if(pressed)
             PORTB|= (1 << PB6);//set backlight on
         else
             PORTB&= ~(1 << PB6);//set backlight off
+*/
 //        lcd_iputchar('R', 0, 6, 0);
 //        lcd_iputchar(uart0_Rx(), 0, 6, 0);
 /*
@@ -551,21 +820,22 @@ s[1]= 0;
 lcd_write_str(s, 0, 0, 0, 0, n);    
 */
 /*
-  while (!(UCSR0A & (1<<UDRE0))) {}
-  UDR0=gps_s[0];
+  while (!(UCSR0A & (1<<UDRE0))) {}  UDR0=gps_s[0];
 */
         }
     
     return(0);
     }
 
-
+/*
 ISR(USART0_RX_vect){
     uart0_byte= UDR0;
     uart0_rec= 1;
     }
-
+*/
 ISR(USART1_RX_vect){
-    uart1_byte= UDR1;
-    uart1_rec= 1;
+    (u1_ringbuf_index > U_RINGBUF_SIZE - 2) ? u1_ringbuf_index= 0 : u1_ringbuf_index++;
+    u1_ringbuf[u1_ringbuf_index]= UDR1;
+//    uart1_byte= UDR1;
+    uart1_rec++;
     }
