@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+//#include <stdint.h>
 #include <avr/io.h>
 #include <inttypes.h>
 #include <avr/eeprom.h>
@@ -31,7 +33,6 @@
 #define LCD_PIXEL_BYTES 1024
 #define lcd_sel() { LCD_CS_PORT&= ~(1 << LCD_CS_PIN); } //select chip
 #define lcd_des() { LCD_CS_PORT|=  (1 << LCD_CS_PIN); } //deselect chip
-
 #define sbi(portn, bitn) asm volatile("sbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
 #define cbi(portn, bitn) asm volatile("cbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
 
@@ -53,14 +54,28 @@
 
 #define U_RINGBUF_SIZE 2048 //1024
 
+#define TIME   0
+#define LAT1   1
+#define LAT2   2
+#define LON1   3
+#define LON2   4
+#define FIX    5
+#define NSAT   6
+#define HDOP   7
+#define GEOID  8
+#define WGS84  9
+#define GPS_DATA_MAX 10 
 
-typedef struct {
-    char* time,* lat1,* lat2,* lon1,* lon2,* fix,* nsat,* HDOP,* alt,* geoid;
-    } gps_t;
 
-volatile uint8_t uart0_byte, uart0_rec, uart1_rec, u1_ringbuf_index;
+typedef char** gps_t;
+
+volatile uint8_t uart0_byte, uart0_rec, uart1_rec;
+volatile uint16_t u1_ringbuf_index;
 volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
-uint8_t u1_ringbuf_last_read;
+uint16_t u1_ringbuf_last_read;
+
+void display_gga(gps_t gps_data); 
+void zero_gps_data(char* s);
 
 /*#######nice function but probably not optimizeable!!!#########
 char setpin(char port, char pin, char state){
@@ -375,34 +390,34 @@ uint8_t* lcd_randomize_matrix(uint8_t* m){
     }
 
 char lcd_putchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t* m){
-//a char within a page, needs a write afterwards! 
+//a char within a page, needs a write afterwards! return absolute cols
 
-    uint8_t width, i;
+    uint8_t end;
 
     if (c < 32 )
-        return(0);
-    width= 127 - col < FONT_WIDTH ? 127 - col : FONT_WIDTH; //check if to draw over the border, for running text;)
-    for (i= 0; i < FONT_WIDTH; i++)
-        lcd_set_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv, trans, m); //_far needed???
-    return(1);
+        return(col);
+    end= 127 - col < FONT_WIDTH ? 127 - col : col + FONT_WIDTH; //check if to draw over the border, for running text;)
+    for (; col < end; col++)
+        lcd_set_byte(pgm_read_byte(&Font[c][FONT_WIDTH - end + col]), col, page, inv, trans, m); //_far needed???
+    return(col);
     }
 
 char lcd_iputchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv){
-//puts char instantly on lcd
+//puts char instantly on lcd, returns absolute col
 
-    uint8_t width, i;
+    uint8_t end;
 
     if (c < 32 )
-        return(0);
-    width= 127 - col < FONT_WIDTH ? 127 - col : FONT_WIDTH; //check if to draw over the border, for running text;)
-    for (i= 0; i < FONT_WIDTH; i++)
-        lcd_iset_byte(pgm_read_byte(&Font[c][i]), col + i, page, inv); //_far needed???
-    return(1);
+        return(col);
+    end= 127 - col < FONT_WIDTH ? 127 - col : col + FONT_WIDTH; //check if to draw over the border, for running text;)
+    for (; col < end; col++)
+        lcd_iset_byte(pgm_read_byte(&Font[c][FONT_WIDTH - end + col]), col, page, inv); //_far needed???
+    return(col);
     }
 
-uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t clear, uint8_t* m){//returns displayed chars
+uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t trans, uint8_t clear, uint8_t* m){//returns absolute col!
 //display a string, needs no write, use' \n'!
-
+    uint8_t colc;
     char* oc;
     oc= c; //for 6x8 there can be 168 full chars on the display
 
@@ -422,23 +437,24 @@ uint8_t lcd_write_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t t
             }
         if (page > 7)
             break;
-        lcd_putchar(*oc, col, page, inv, trans, m);
-        col+= FONT_WIDTH;
+        col= lcd_putchar(*oc, col, page, inv, trans, m);
         oc++;
         }
-    if(clear)
-        while (col < 128){
-            lcd_set_byte(0, col, page, inv, 0, m);
-            col++;
+    if(clear){
+        colc= col;
+        while (colc < 128){
+            lcd_set_byte(0, colc, page, inv, 0, m);
+            colc++;
             }
+        }
     lcd_write_matrix(m);
-    return((oc - c));
+    return(col);//((oc - c));
     }
 
-uint8_t lcd_iwrite_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t clear ){//returns next col [//returns displayed chars]
+uint8_t lcd_iwrite_str(const char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t clear ){//returns absolute cols [//returns displayed chars]
 //display a string, needs no write, use' \n'!
-
-    char* oc;
+    uint8_t colc;
+    const char* oc;
     oc= c; //for 6x8 there can be 168 full chars on the display
 
     while (*oc) {
@@ -457,15 +473,16 @@ uint8_t lcd_iwrite_str(char* c, uint8_t col, uint8_t page, uint8_t inv, uint8_t 
             }
         if (page > 7)
             break;
-        lcd_iputchar(*oc, col, page, inv);
-        col+= FONT_WIDTH;
+        col= lcd_iputchar(*oc, col, page, inv);
         oc++;
         }
-    if(clear)
-        while (col < 128){
-            lcd_iset_byte(0, col, page, inv);
-            col++;
+    if(clear){
+        colc= col;
+        while (colc < 128){
+            lcd_iset_byte(0, colc, page, inv);
+            colc++;
             }
+        }
     return(col);//(oc - c);
     }
 
@@ -510,7 +527,7 @@ uint8_t uart1_Rx(void){
     return UDR1;                   // Zeichen aus UDR an Aufrufer zurueckgeben
     }
 
-char uart1_getchar(){
+char uart1_getchar(void){
 
     uart1_rec--; //check before uart1_getchar() if uart1_rec > 0 !!!
     if (u1_ringbuf_last_read > U_RINGBUF_SIZE - 2)
@@ -527,55 +544,167 @@ void uart0_write_str(char* s){
         }
     while (!(UCSR0A & (1<<UDRE0))) {}
     UDR0='\r';
-//    while (!(UCSR0A & (1<<UDRE0))) {}
-//    UDR0='\n';
+    while (!(UCSR0A & (1<<UDRE0))) {}
+    UDR0='\n';
     while(!(UCSR0A & (1<<TXC0))) {}        
     }
 
-char gps_process_gga(char* s, gps_t* gps_data){
+char gps_process_gga(char* const o, gps_t gps_data){
 //retruns number of successfully read fields
 //only valid if 10 is returned!
 
-    char* t;
-
+    char* t, * s;
+    s= o; //keep original pointer unchanged!
     if(!(t= strchr(s, ',')))
         return(0);
-    s= gps_data->time= t + 1;
+    s= gps_data[TIME]= t + 1;
     if(!(t= strchr(s, ',')))
         return(1);
-    s= gps_data->lat1= t + 1;
+    s= gps_data[LAT1]= t + 1;
     if(!(t= strchr(s, ',')))
         return(2);
-    s= gps_data->lat2= t + 1;
+    s= gps_data[LAT2]= t + 1;
     if(!(t= strchr(s, ',')))
         return(3);
-    s= gps_data->lon1= t + 1;
+    s= gps_data[LON1]= t + 1;
     if(!(t= strchr(s, ',')))
         return(4);
-    s= gps_data->lon2= t + 1;
+    s= gps_data[LON2]= t + 1;
     if(!(t= strchr(s, ',')))
         return(5);
-    s= gps_data->fix= t + 1;
+    s= gps_data[FIX]= t + 1;
     if(!(t= strchr(s, ',')))
         return(6);
-    s= gps_data->nsat= t + 1;
+    s= gps_data[NSAT]= t + 1;
     if(!(t= strchr(s, ',')))
         return(7);
-    s= gps_data->HDOP= t + 1;
+    s= gps_data[HDOP]= t + 1;
     if(!(t= strchr(s, ',')))
         return(8);
-    s= gps_data->alt= t + 1;
+    s= gps_data[GEOID]= t + 1;
     if(!(t= strchr(s, ',')))
         return(9);
-    s= gps_data->geoid= t + 1;
+    s= t + 1; //skip M
+    if(!(t= strchr(s, ',')))
+        return(9);
+    s= gps_data[WGS84]= t + 1;
     return(10); 
     //check hash
     }
 
-void gps_process(char* s, gps_t* gps_data){
+char gps_det_type(char* s, char* t){
+    char i;
 
-    if(!strncmp(s, "GPGGA", 5))
-        gps_process_gga(s, gps_data);
+    for (i= 0; i < 5; i++)
+        if (*s++ != *t++)
+            return(0);
+    return(1);
+    }
+
+void display_time(char* time, uint8_t col, uint8_t page){
+    char* s;
+
+    s= time;
+//    col= lcd_iwrite_str("UTC: ", col, page, 0, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(':', col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(':', col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    //skip fraction of s
+    }
+
+void display_lat(const char* lat1, const char* lat2, uint8_t col, const uint8_t page){
+    const char* s;
+    char sec_s[8];
+    float sec; 
+
+    s= lat1;
+    col= lcd_iputchar('0', col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar('°', col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar('\'', col, page, 0);
+    s++;//skip decimal point
+    memcpy(sec_s, s, 5);
+    sec_s[5]= 0;
+//    strncpy(sec_s, s, 5);//does this set sec_s[5]= 0 ???
+    sec= atol(sec_s) * 60 / 100000.0;
+    dtostrf(sec, 5, 3, sec_s);
+    if (sec < 10)
+        col= lcd_iputchar('0', col, page, 0); //to avoid sprintf
+//    sprintf(sec_s, "%6.3f", sec);
+//    ltoa((long)sec, sec_str, 10);
+    col= lcd_iwrite_str(sec_s, col, page, 0, 0);
+    col= lcd_iputchar('"', col, page, 0);
+    lcd_iputchar(*lat2, col, page, 0);
+    }
+
+void display_lon(const char* lon1, const char* lon2, uint8_t col, const uint8_t page){
+    const char* s;
+    char sec_s[8];
+    float sec; 
+
+    s= lon1;
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar('°', col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar(*s++, col, page, 0);
+    col= lcd_iputchar('\'', col, page, 0);
+    s++;//skip decimal point
+    memcpy(sec_s, s, 5);
+    sec_s[5]= 0;
+//    strncpy(sec_s, s, 5);//does this set sec_s[5]= 0 ???
+    //lcd_iwrite_str(sec_s, 0, 3, 0, 0);
+    sec= atol(sec_s) * 60 / 100000.0;
+    dtostrf(sec, 5, 3, sec_s);
+    if (sec < 10)
+        col= lcd_iputchar('0', col, page, 0); //to avoid sprintf
+//    sprintf(sec_s, "%6.3f", sec);
+//    ltoa((long)sec, sec_s, 10);
+    col= lcd_iwrite_str(sec_s, col, page, 0, 0);
+    col= lcd_iputchar('"', col, page, 0);
+    lcd_iputchar(*lon2, col, page, 0);
+    }
+
+void display_nsat(const char* s, uint8_t col, const uint8_t page){
+
+    lcd_iwrite_str(s, col, page, 0, 1);
+    }
+
+void display_geoid(const char* s, const uint8_t col, const uint8_t page){
+    
+    lcd_iwrite_str(s, col, page, 0, 1);
+    }
+
+void display_gga(gps_t gps_data){
+    if(*gps_data[TIME])
+        display_time(gps_data[TIME], 0, 0);
+    if(*gps_data[LAT1] && *gps_data[LAT2])
+        display_lat(gps_data[LAT1], gps_data[LAT2], 0, 1);
+    if(*gps_data[LON1] && *gps_data[LON2])
+        display_lon(gps_data[LON1], gps_data[LON2], 0, 2);
+    if(*gps_data[NSAT])
+        display_nsat(gps_data[NSAT], 10 * FONT_WIDTH, 0);
+    if(*gps_data[GEOID])
+        display_geoid(gps_data[GEOID], 13 * FONT_WIDTH, 0);
+       }
+
+void gps_process(char* const s, gps_t gps_data){
+
+    if(gps_det_type(s, "GPGGA")){ //(strstr(s, "GPGGA")) //(!strncmp(s, "GPGGA", 5))
+        gps_process_gga(s, gps_data); 
+        lcd_iwrite_str(s, 0, 4, 1, 1); //why is GPGGA still there after gps_det_type()???
+        zero_gps_data(s); //this truncates s!!!!
+        display_gga(gps_data);
+        }
 /*    else if(!strncmp(s, "GPRMC", 5))
         gps_process_rmc(s);
     else if(!strncmp(s, "GPGSA", 5))
@@ -583,110 +712,38 @@ void gps_process(char* s, gps_t* gps_data){
 */
     }
 
-void display_time(char* time, uint8_t col, uint8_t page){
-    char* s;
+void init_gps_data(gps_t gps_data){
+    uint8_t i;
 
-    s= time;
-    col+= lcd_iwrite_str("UTC: ", col, page, 0, 0);
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(':', col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(':', col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
+    for (i= 0; i < GPS_DATA_MAX; i++)
+        gps_data[i]= 0;
     }
+/*
+void zero_gps_data(gps_t gps_data){
+    uint8_t i;
 
-void display_lat(char* lat1, char* lat2, uint8_t col, uint8_t page){
-    char* s;
-    int sec;
-
-    s= lat1;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar('°', col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar('\'', col, page, 0);
-    col+= FONT_WIDTH;
-    s++;//skip decimal point
-    sec= atoi(s);
-    itoa(sec * 60, s, 10);
-    col+= lcd_iwrite_str(s, col, page, 0, 0);
-    lcd_iputchar('"', col, page, 0);
-    lcd_iputchar(lat2, col, page, 0);
+    for (i= 0; i < GPS_DATA_MAX; i++)
+        if (*(gps_data[i]) == ',')
+            gps_data[i]= 0;
     }
-
-void display_lon(char* lon1, char* lon2, uint8_t col, uint8_t page){
-    char* s;
-    int sec;
-
-    s= lon1;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar('°', col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar(*s++, col, page, 0);
-    col+= FONT_WIDTH;
-    lcd_iputchar('\'', col, page, 0);
-    col+= FONT_WIDTH;
-    s++;//skip decimal point
-    sec= atoi(s);
-    itoa(sec * 60, s, 10);
-    col+= lcd_iwrite_str(s, col, page, 0, 0);
-    lcd_iputchar('"', col, page, 0);
-    lcd_iputchar(lon2, col, page, 0);
-    }
-
-void display_gga(gps_t* gps_data){
-    if(gps_data->time)
-        display_time(gps_data->time, 0, 0);
-    if(gps_data->lat1 && gps_data->lat2)
-        display_lat(gps_data->lat1, gps_data->lat2, 0, 1);
-    if(gps_data->lon1 && gps_data->lon2)
-        display_lon(gps_data->lon1, gps_data->lon2, 0, 2);
-
-    }
-
-void init_gps_data(gps_t* gps_data){
-    gps_data->time= 0;
-    gps_data->lat1= 0;
-    gps_data->lat2= 0;
-    gps_data->lon1= 0;
-    gps_data->lon2= 0;
-    gps_data->fix= 0;
-    gps_data->nsat= 0;
-    gps_data->HDOP= 0;
-    gps_data->alt= 0;
-    gps_data->geoid= 0;
+*/
+void zero_gps_data(char* s){
+    
+    while(*s){
+        *s= *s == ',' ? 0 : *s; //replace ',' , use if(*gps_data[LAT1]) to check!!!
+        s++;
+        }
     }
 
 int main(void){
     uint8_t j= 0, lcd_on= 0;
     uint16_t i, last_lr, col;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
-    uint8_t *n, *o;
-    char gps_s[80], s[5], c;
-    gps_t gps_data;
+    uint8_t * n, * o;
+    char gps_str[80], s[5], c;
+    char* gps_d[GPS_DATA_MAX], * gps_s;
+//    gps_t gps_data= gps_d;
+    gps_s= gps_str;
 
     n= new;
     o= old;
@@ -709,7 +766,7 @@ int main(void){
 
     dreh_init(); //uses timer2; inc_push, inc_lr, pressed
 
-    init_gps_data(&gps_data);
+    init_gps_data(gps_d);
 /* 
    lcd_des();
     MMC_IO_Init();
@@ -718,14 +775,11 @@ int main(void){
 
 //    while (!(UCSR0A & (1<<UDRE0))) {}
 //    UDR0='H';
-    PORTB|= (1 << PB6); //set backlight on
+    //PORTB|= (1 << PB6); //set backlight on
     PORTD|= (1 << PD7);//switch on gps
-    _delay_ms(128);
     lcd_randomize_matrix(n);
     lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, 0, n);
     lcd_write_matrix(n);
-    _delay_ms(128);
-    lcd_iputchar('R', 0, 6, 0);
     for(;;){
 /*
         lcd_des();
@@ -746,7 +800,7 @@ int main(void){
             sei();
             */
             c= uart1_getchar();
-            if (c == '\r'){ //end
+            if (c == '\r'){ //end \r\n
                 gps_s[j]= 0;
                 //gps_com= 1;
                 j= 0;    
@@ -755,20 +809,20 @@ int main(void){
 //                cli();
 //                lcd_iwrite_str(gps_s, 0, 3, 0, 0);
                 uart0_write_str(gps_s);
-
                 if(*gps_s == '$'){
                     //cli();
-                    gps_process(gps_s + 1,&gps_data);
-                    display_gga(&gps_data);
-                    //sei();
+                    //uart0_write_str(gps_s + 1);
+                    gps_process(gps_s + 1, gps_d);
+                    //display_gga(gps_d);
+                   //sei();
                     }
 
 //                sei();
                 }
-            else{
-                gps_s[j]=c;
-                j++;
-                }
+            else if (c > 0x20){ // (c != '\n'){
+                 gps_s[j]=c;
+                 j++;
+                 }
 
             if(j > 80){
                 lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, 0, n);
@@ -785,9 +839,10 @@ int main(void){
                 PORTB&= ~(1 << PB6);//set backlight off
             else
                 PORTB|= (1 << PB6);//set backlight on
-            gps_process("GPGGA,201835.00,,,,,0,00,99.99,,,,,,*6B", &gps_data);
-            display_gga(&gps_data);
-            col= lcd_iwrite_str("UTC: ", 0, 6, 0, 0);
+            gps_process("GPGGA,230906.00,5125.54685,N,00709.16364,E,1,04,8.01,127.3,M,47.5,M,,*5F", gps_d);//"GPGGA,201835.00,,,,,0,00,99.99,,,,,,*6B", gps_d);
+            zero_gps_data(gps_s);
+            display_gga(gps_d);
+            col= lcd_iwrite_str("UTC: ", 3, 6, 0, 0);
             lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             }
         if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
