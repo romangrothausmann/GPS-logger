@@ -66,7 +66,9 @@
 #define WGS84  9
 #define GPS_DATA_MAX 10 
 
-
+#define INFO   1
+#define GGA    2
+#define MENU_MAX 2
 typedef char** gps_t;
 
 volatile uint8_t uart0_byte, uart0_rec, uart1_rec;
@@ -490,6 +492,13 @@ void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a c
 
     }
 
+void clear_matrix(uint8_t* m){
+    uint16_t i;
+    
+    for (i= 0; i < LCD_PIXEL_BYTES; i++) //clear matrix
+        m[i]= 0;
+    }
+
 void uart0_init(uint16_t baud){//51 for 9600bps
 //    UBRR0H = (unsigned char)(baud >> 8);
 //    UBRR0L = (unsigned char)baud;
@@ -497,8 +506,6 @@ void uart0_init(uint16_t baud){//51 for 9600bps
     UBRR0L = baud & 0xFF;
     UCSR0C|= (3<<UCSZ00);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
     UCSR0B|=  (1<<RXCIE0)|(1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
-
-
     }
 
 void uart1_init(uint16_t baud){//51 for 9600bps
@@ -701,9 +708,9 @@ void gps_process(char* const s, gps_t gps_data){
 
     if(gps_det_type(s, "GPGGA")){ //(strstr(s, "GPGGA")) //(!strncmp(s, "GPGGA", 5))
         gps_process_gga(s, gps_data); 
-        lcd_iwrite_str(s, 0, 4, 1, 1); //why is GPGGA still there after gps_det_type()???
+//        lcd_iwrite_str(s, 0, 4, 1, 1); //why is GPGGA still there after gps_det_type()???
         zero_gps_data(s); //this truncates s!!!!
-        display_gga(gps_data);
+//        display_gga(gps_data);
         }
 /*    else if(!strncmp(s, "GPRMC", 5))
         gps_process_rmc(s);
@@ -737,13 +744,14 @@ void zero_gps_data(char* s){
 
 int main(void){
     uint8_t j= 0, lcd_on= 0;
-    uint16_t i, last_lr, col;
+    uint8_t menu_cnt, menu_sel; //menu stuff
+    uint16_t last_lr, col;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t * n, * o;
     char gps_str[80], s[5], c;
     char* gps_d[GPS_DATA_MAX], * gps_s;
 //    gps_t gps_data= gps_d;
-    gps_s= gps_str;
+    gps_s= gps_str; //bakup of pointer, save is save;)
 
     n= new;
     o= old;
@@ -753,9 +761,6 @@ int main(void){
     
     DDRD= 0x80;  //1000 0000 //gps on
 
-    //DDRD &= ~(7 << PD4);//set to input for encoder
-    
-    //PORTD&= ~(1 << PB0); //SS
     PORTD|=  (7 << PD4); //swith on pull-up 
 
     lcd_init(); // must be executed at the very beginning!
@@ -769,60 +774,31 @@ int main(void){
     init_gps_data(gps_d);
 /* 
    lcd_des();
-    MMC_IO_Init();
+   MMC_IO_Init();
 */
     sei();
 
-//    while (!(UCSR0A & (1<<UDRE0))) {}
-//    UDR0='H';
     //PORTB|= (1 << PB6); //set backlight on
     PORTD|= (1 << PD7);//switch on gps
     lcd_randomize_matrix(n);
     lcd_write_str("Hello World!\nGo, go!\nJuppey, this actually works great! Incredible this is, wow!", 0, 1, 0, 0, 0, n);
     lcd_write_matrix(n);
     for(;;){
-/*
-        lcd_des();
-        if(GetDriveInformation()!=F_OK){ // get drive parameters
-            lcd_write_str("Drive Info not OK! ", 0, 0, 1, 0, 1, n);
-            }
-        else
-            lcd_write_str("Drive Info OK! ", 0, 0, 1, 0, 1, n);
-*/
-        //interrupt gps
-        
         if(uart1_rec){
-            /*
-            while (!(UCSR0A & (1<<UDRE0))) {}
-            cli();
-            UDR0=uart1_byte;
-            while(!(UCSR0A & (1<<TXC0))) {}
-            sei();
-            */
             c= uart1_getchar();
             if (c == '\r'){ //end \r\n
                 gps_s[j]= 0;
                 //gps_com= 1;
                 j= 0;    
-                //for (i= 0; i < LCD_PIXEL_BYTES; i++) //clear matrix
-                //    n[i]= 0;
-//                cli();
-//                lcd_iwrite_str(gps_s, 0, 3, 0, 0);
                 uart0_write_str(gps_s);
                 if(*gps_s == '$'){
-                    //cli();
-                    //uart0_write_str(gps_s + 1);
                     gps_process(gps_s + 1, gps_d);
-                    //display_gga(gps_d);
-                   //sei();
                     }
-
-//                sei();
                 }
             else if (c > 0x20){ // (c != '\n'){
-                 gps_s[j]=c;
-                 j++;
-                 }
+                gps_s[j]=c;
+                j++;
+                }
 
             if(j > 80){
                 lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, 0, n);
@@ -831,8 +807,8 @@ int main(void){
             }
         
         if (inc_push){
-            //lcd_write_str("Encoder pressed! ", 0, 0, 0, 0, 1, n);
-            //lcd_iwrite_str(itoa(inc_lr, s, 10), 0, 6, 0, 1);
+            menu_sel!= menu_sel; //change menu or other input switch
+                
             inc_push= 0;
             lcd_on= !lcd_on;
             if (lcd_on)
@@ -845,37 +821,35 @@ int main(void){
             col= lcd_iwrite_str("UTC: ", 3, 6, 0, 0);
             lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             }
-        if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
-            //cli();
-            lcd_iwrite_str(itoa(inc_lr, s, 10), 0, 7, 0, 1);
-            //sei();
-            last_lr= inc_lr;
+        if (menu_sel){
+            if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
+                //cli();
+                menu_cnt= inc_lr % MENU_MAX;
+                lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 7, 0, 1);
+                //sei();
+                last_lr= inc_lr;
+                }
             }
+        else {
+            switch(menu_cnt){
+            case INFO:
+                clear_matrix(n);
+                display_gga(gps_d);
+                break;
+            case GGA:
+                clear_matrix(n);
+                if(gps_det_type(gps_s, "GPGGA"))
+                    lcd_iwrite_str(gps_s, 0, 4, 1, 1);
+                break;
+            default:
+                lcd_iwrite_str("Menu not known!", 0, 7, 1, 1);
+                }
+            } 
 /*
-        if(pressed)
-            PORTB|= (1 << PB6);//set backlight on
-        else
-            PORTB&= ~(1 << PB6);//set backlight off
-*/
-//        lcd_iputchar('R', 0, 6, 0);
-//        lcd_iputchar(uart0_Rx(), 0, 6, 0);
-/*
-  if(uart0_rec){
-  lcd_iputchar(uart0_byte, 10, 6, 0);
-  uart0_rec= 0;
-  }
-*/
-        //lcd_write_str(s, 0, 0, 0, 0, n);
-
-
-/*
-//polling gps
-s[0]=uart1_Rx();
-s[1]= 0;
-lcd_write_str(s, 0, 0, 0, 0, n);    
-*/
-/*
-  while (!(UCSR0A & (1<<UDRE0))) {}  UDR0=gps_s[0];
+  if(pressed)
+  PORTB|= (1 << PB6);//set backlight on
+  else
+  PORTB&= ~(1 << PB6);//set backlight off
 */
         }
     
