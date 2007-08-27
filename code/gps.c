@@ -71,14 +71,16 @@
 #define INFO   0
 #define GGA    1
 #define LCD    2
-#define MENU_MAX 3
+#define UART   3
+#define MENU_MAX 4
 
 //gps_status 
-#define ERROR    0
+#define ERROR    111
 #define WAITING  1
 #define NEW_MENU 2
-#define NEW_GGA  3
-#define DONE     4
+#define DONE     3
+#define BAD_CS   4
+#define NEW_GGA  100  //gps protocols above 99!
 
 typedef char** gps_t;
 
@@ -247,7 +249,7 @@ void lcd_init(void){
     lcd_des();
     }
 
-void lcd_clear(uint8_t* m){
+void lcd_clear(void){
     uint16_t i;
     uint8_t j;
 
@@ -263,8 +265,6 @@ void lcd_clear(uint8_t* m){
     lcd_command(0x10);
     lcd_command(0x00);
     lcd_des();
-    for (i= 0; i < LCD_PIXEL_BYTES; i++) //should this be moved out?
-        m[i]= 0;
     }
 
 /*
@@ -547,9 +547,10 @@ uint8_t uart1_Rx(void){
 char uart1_getchar(void){
 
     uart1_rec--; //check before uart1_getchar() if uart1_rec > 0 !!!
-    if (u1_ringbuf_last_read > U_RINGBUF_SIZE - 2)
-        u1_ringbuf_last_read= 0;
-    return(u1_ringbuf[u1_ringbuf_last_read++]);
+    //if (u1_ringbuf_last_read > U_RINGBUF_SIZE - 1)
+    //    u1_ringbuf_last_read= 0;
+    (u1_ringbuf_last_read > U_RINGBUF_SIZE - 2) ? u1_ringbuf_last_read= 0 : u1_ringbuf_last_read++;
+    return(u1_ringbuf[u1_ringbuf_last_read]);
     //return(u1_ringbuf_finished || u1_ringbuf_last_read < u1_ringbuf_index ? u1_ringbuf[u1_ringbuf_last_read++] : 0);
     }
 
@@ -653,7 +654,7 @@ void display_lat(const char* lat1, const char* lat2, uint8_t col, const uint8_t 
 //    strncpy(sec_s, s, 5);//does this set sec_s[5]= 0 ???
     sec= atol(sec_s) * 60 / 100000.0;
     dtostrf(sec, 5, 3, sec_s);
-    if (sec < 10)
+    if (sec < 9.9995) //because dtostrf rounds! pre up to 9.999499!  < 10)
         col= lcd_iputchar('0', col, page, 0); //to avoid sprintf
 //    sprintf(sec_s, "%6.3f", sec);
 //    ltoa((long)sec, sec_str, 10);
@@ -682,7 +683,7 @@ void display_lon(const char* lon1, const char* lon2, uint8_t col, const uint8_t 
     //lcd_iwrite_str(sec_s, 0, 3, 0, 0);
     sec= atol(sec_s) * 60 / 100000.0;
     dtostrf(sec, 5, 3, sec_s);
-    if (sec < 10)
+    if (sec < 9.9995) //because dtostrf rounds!  < 10)
         col= lcd_iputchar('0', col, page, 0); //to avoid sprintf
 //    sprintf(sec_s, "%6.3f", sec);
 //    ltoa((long)sec, sec_s, 10);
@@ -715,7 +716,20 @@ void display_gga(gps_t gps_data){
        }
 
 uint8_t gps_process(char* const s, gps_t gps_data){
+    char* t, * h;
+    uint8_t cs= 0;
+    char sum[3];
 
+    h= s;
+    if((t= strchr(s, '*')))
+        while(h < t)
+            cs= cs ^ *h++;
+    if(strtol(++t, (char **)NULL, 16) != cs){
+        lcd_iwrite_str("BAD_CS!", 0, 5, 1, 1);
+        lcd_iwrite_str(t, 48, 5, 1, 1);
+        lcd_iwrite_str(itoa(cs,sum,16), 66, 5, 1, 1);
+         return(BAD_CS);
+        }
     if(gps_det_type(s, "GPGGA")){ //(strstr(s, "GPGGA")) //(!strncmp(s, "GPGGA", 5))
         gps_process_gga(s, gps_data); 
 //        lcd_iwrite_str(s, 0, 4, 1, 1); //why is GPGGA still there after gps_det_type()???
@@ -756,7 +770,7 @@ void zero_gps_data(char* s){
 
 int main(void){
     uint8_t j= 0, lcd_on= 0, gps_status= 1, gps_status_old= 0;
-    uint8_t menu_cnt= 0, menu_sel= 1; //menu stuff
+    uint8_t menu_cnt= 0, menu_cnt_old=1, menu_sel= 1; //menu stuff
     uint16_t last_lr;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t * n, * o;
@@ -776,7 +790,8 @@ int main(void){
     PORTD|=  (7 << PD4); //swith on pull-up 
 
     lcd_init(); // must be executed at the very beginning!
-    lcd_clear(n);
+    lcd_clear();
+    clear_matrix(n);
 
     uart0_init(UBRR_VAL);
     uart1_init(UBRR_VAL);
@@ -797,8 +812,8 @@ int main(void){
     lcd_write_matrix(n);
     for(;;){
         gps_status= DONE;
-        if(uart1_rec){
-            c= uart1_getchar();
+        while(uart1_rec){
+            c= uart1_getchar();//this decreases uart1_rec!
             if (c == '\r'){ //end \r\n
                 gps_s[j]= 0;
                 strcpy(gps_line, gps_s);
@@ -808,6 +823,7 @@ int main(void){
                 if(*gps_s == '$'){
                     gps_status= gps_process(gps_s + 1, gps_d);
                     }
+                break;
                 }
             else if (c > 0x20){ // (c != '\n'){
                 gps_s[j]=c;
@@ -819,12 +835,11 @@ int main(void){
                 j= 0;
                 }
             }
-        
+      
         if (inc_push){
             menu_sel= !menu_sel; //change menu or other input switch
             inc_push= 0;
-            clear_matrix(n);
-            lcd_write_matrix(n);
+            lcd_clear();
             gps_status= NEW_MENU;
             /*
               gps_process("GPGGA,230906.00,5125.54685,N,00709.16364,E,1,04,8.01,127.3,M,47.5,M,,*5F", gps_d);//"GPGGA,201835.00,,,,,0,00,99.99,,,,,,*6B", gps_d);
@@ -833,29 +848,45 @@ int main(void){
               col= lcd_iwrite_str("UTC: ", 3, 6, 0, 0);
               lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             */
+            if (!menu_sel && menu_cnt == LCD){
+                    lcd_on= !lcd_on;
+                    if (lcd_on){
+                         PORTB&= ~(1 << PB6);//set backlight off
+                         lcd_iwrite_str("Backlight off", 0, 6, 1, 1);
+                        }
+                    else {
+                        PORTB|= (1 << PB6);//set backlight on                
+                        lcd_iwrite_str("Backlight on", 0, 6, 1, 1);
+                        }
+                }
             }
         if (menu_sel){
             if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
                 //cli();
-                menu_cnt= inc_lr % MENU_MAX;
+                menu_cnt= (uint8_t) inc_lr % MENU_MAX;
                 lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 7, 0, 1);
                 //sei();
                 last_lr= inc_lr;
                 }
             }
-        else {
+        else if(gps_status != DONE) {
             switch(menu_cnt){
             case INFO:
-                //if(gps_status_old!= gps_status){
-                //    gps_status_old= gps_status;
                 switch(gps_status){
                 case NEW_GGA:
-                    //clear_matrix(n);
-                    //lcd_write_matrix(n);
+                    //lcd_clear();//yields flickering
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//yields flickering
+                        }
                     display_gga(gps_d);
                     break;
                 case NEW_MENU:
                     //case WAITING:
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//yields flickering
+                        }
                     lcd_iwrite_str("Info-menue\nwaiting...", 0, 0, 1, 0);
                     break; 
 //                case ERROR: //uncomment when all other done
@@ -868,16 +899,24 @@ int main(void){
                 //if(gps_status_old!= gps_status){
                 //    gps_status_old= gps_status;
                 if(gps_status == NEW_GGA){
-                    //                   clear_matrix(n);
-                    //lcd_write_matrix(n);
-                    //if(gps_det_type(gps_s, "GPGGA"))
+                    //lcd_clear();//yields flickering
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//yields flickering
+                        }
                     lcd_iwrite_str(gps_line, 0, 0, 0, 1);
                     }
-                if(gps_status == NEW_MENU)
+                if(gps_status == NEW_MENU){
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//yields flickering
+                        }
                     lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
-                //    }
+                    }
                 break;
+
             case LCD:
+/*
                 if(gps_status == NEW_MENU){
                     lcd_iwrite_str("Backlight on/off", 0, 6, 1, 1);
                     lcd_on= !lcd_on;
@@ -885,6 +924,17 @@ int main(void){
                         PORTB&= ~(1 << PB6);//set backlight off
                     else
                         PORTB|= (1 << PB6);//set backlight on
+                    }
+*/
+                break;
+            case UART:
+                //if(gps_status == BAD_CS)
+                //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
+                if(gps_status >= BAD_CS){// NEW_GGA){
+                    lcd_iwrite_str("Writing to UART0", 0, 6, 1, 1);
+                    if(gps_status == BAD_CS)
+                       uart0_write_str("E:"); 
+                    uart0_write_str(gps_line);
                     }
                 break;
             default:
