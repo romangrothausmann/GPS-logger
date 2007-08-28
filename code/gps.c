@@ -64,15 +64,23 @@
 #define HDOP   7
 #define GEOID  8
 #define WGS84  9
-#define GPS_DATA_MAX 10 
+#define NOM   10 //GSV total number of messages
+#define MNO   11 //GSV message number
+#define SIV   12 //GSV number of sats in view
+//#define 
+#define GPS_DATA_MAX 13
 
+#define GSV_MAX 469 //",nn,ee,aaa,ss"=13: x36 + 1 = 469; 31 sats now, changing
+
+#define MAX_SATS 20
 
 //Menu defines
 #define INFO   0
 #define GGA    1
-#define LCD    2
+#define GSV    2
 #define UART   3
-#define MENU_MAX 4
+#define LCD    4
+#define MENU_MAX 5
 
 //gps_status 
 #define ERROR    111
@@ -81,6 +89,7 @@
 #define DONE     3
 #define BAD_CS   4
 #define NEW_GGA  100  //gps protocols above 99!
+#define NEW_GSV  101
 
 typedef char** gps_t;
 
@@ -353,6 +362,14 @@ char lcd_iset_byte(uint8_t byte, uint8_t col, uint8_t page, uint8_t inv){
     return(1);
     }
 
+void lcd_clear_line(uint8_t col, uint8_t page, char inv){
+
+    while (col < 128){
+        lcd_iset_byte(0, col, page, inv);
+        col++;
+        }
+    }
+
 void lcd_write_matrix(uint8_t* m){
     uint16_t i;
     uint8_t page, col;
@@ -419,11 +436,20 @@ char lcd_iputchar(uint8_t c, uint8_t col, uint8_t page, uint8_t inv){
 
     uint8_t end;
 
-    if (c < 32 )
+    if (c < 32 )//does this work with char as well???
         return(col);
     end= 127 - col < FONT_WIDTH ? 127 - col : col + FONT_WIDTH; //check if to draw over the border, for running text;)
     for (; col < end; col++)
         lcd_iset_byte(pgm_read_byte(&Font[c][FONT_WIDTH - end + col]), col, page, inv); //_far needed???
+    return(col);
+    }
+
+char lcd_iputmchar(char* c, uint8_t num, uint8_t col, uint8_t page, uint8_t inv){
+//puts num chars instantly on lcd, returns absolute col
+    uint8_t i;
+
+    for(i= 0; i < num; i++)
+        col= lcd_iputchar(c[i], col, page, inv);
     return(col);
     }
 
@@ -565,6 +591,90 @@ void uart0_write_str(char* s){
     while (!(UCSR0A & (1<<UDRE0))) {}
     UDR0='\n';
     while(!(UCSR0A & (1<<TXC0))) {}        
+    }
+
+char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats) {
+//returns total number of processed sats 
+    char* s, * t;
+    uint8_t siv, sat_num;
+
+
+    s= o; //keep original pointer unchanged!
+    s= gps_data[NOM]= strchr(s, ',') + 1;
+    s= gps_data[MNO]= strchr(s, ',') + 1;
+    s= gps_data[SIV]= strchr(s, ',') + 1;
+    s= strchr(s, ','); //set beginning of specific data with ','!
+    //*strchr(s, '*')= 0; //terminate
+    t= strrchr(s, '*'); //ends with ",*" if no SNR sent!
+    *t= 0;
+
+    if(*gps_data[MNO] == '1')
+        *gsv_sats= 0;
+    //check for space?
+    strcat(gsv_sats, s);
+    //uart0_write_str(gsv_sats);
+    if(*gps_data[NOM] != *gps_data[MNO]){
+        return(0);
+        }
+        
+    siv= atoi(gps_data[SIV]);
+
+    s= gsv_sats;
+    sat_num= 0;
+    while((s= strchr(s, ','))){
+        sat_num++;
+        s++;
+        }
+    if(sat_num / 4 != siv){ //this should be removed later!
+        lcd_iwrite_str("sat_num != siv", 0, 6, 1, 0);
+        return(0);
+        }
+    return(sat_num); 
+    }
+
+void gps_display_gsv(gps_t gps_data, const char* const gsv_sats, uint8_t tsat) {
+    uint8_t col= 0, i, j, siv;
+    char s[4];
+    const char* o;
+
+    col= lcd_iputmchar(gps_data[SIV], 2, col, 0, 0);
+//    col= lcd_iwrite_str(itoa(sat_num, s, 10),  col, 0, 0, 0);
+    col= lcd_iwrite_str(": S# EL AZI SNR", col, 0, 0, 0);
+
+
+    o= gsv_sats;
+    siv= atoi(gps_data[SIV]);
+    tsat+= 256 / siv / 2 * siv; //set tsat to mid 256 so 0->255 break is far away
+    for(j= 0; j < tsat % siv; j++)
+        for(i= 0; i < 4; i++)
+            o= strchr(o, ',') + 1;
+    j= tsat % siv;
+
+    for(i= 0; i < 7; i++, j++){
+        col= 0;
+        if(j >= siv)
+            j= 0;
+        if(j < 10) //right align
+            col= lcd_iputchar(' ', col, i + 1 , 0);
+        col= lcd_iwrite_str(itoa(j, s, 10), col, i + 1, 0, 0);
+        col= lcd_iwrite_str(": ", col, i + 1 , 0, 0); //better 2x iputchar???
+        o= strchr(o, ',') + 1;
+        if(!*o)
+            o= gsv_sats + 1;
+        col= lcd_iputmchar(o, 2, col, i + 1, 0);
+        col= lcd_iputchar(' ', col, i + 1 , 0); //this could go in a for loop
+        o= strchr(o, ',') + 1;
+        col= lcd_iputmchar(o, 2, col, i + 1, 0);
+        col= lcd_iputchar(' ', col, i + 1 , 0);
+        o= strchr(o, ',') + 1;
+        col= lcd_iputmchar(o, 3, col, i + 1, 0);
+        col= lcd_iputchar(' ', col, i + 1 , 0);
+        o= strchr(o, ',') + 1;
+        if(*o == ',' || !*o)//SNR not always sent!
+            lcd_clear_line(col, i + 1, 0);
+        else
+            col= lcd_iputmchar(o, 2, col, i + 1, 0);
+        }
     }
 
 char gps_process_gga(char* const o, gps_t gps_data){
@@ -715,7 +825,7 @@ void display_gga(gps_t gps_data){
         display_geoid(gps_data[GEOID], 13 * FONT_WIDTH, 0);
        }
 
-uint8_t gps_process(char* const s, gps_t gps_data){
+uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats){
     char* t, * h;
     uint8_t cs= 0;
     char sum[3];
@@ -734,8 +844,13 @@ uint8_t gps_process(char* const s, gps_t gps_data){
         gps_process_gga(s, gps_data); 
 //        lcd_iwrite_str(s, 0, 4, 1, 1); //why is GPGGA still there after gps_det_type()???
         zero_gps_data(s); //this truncates s!!!!
-//        display_gga(gps_data);
         return(NEW_GGA);
+        }
+    if(gps_det_type(s, "GPGSV")){ 
+        if(gps_process_gsv(s, gps_data, gsv_sats))
+            return(NEW_GSV);
+        //else
+        //    return(GSV_UNF);
         }
 /*    else if(!strncmp(s, "GPRMC", 5))
         gps_process_rmc(s);
@@ -771,12 +886,16 @@ void zero_gps_data(char* s){
 int main(void){
     uint8_t j= 0, lcd_on= 0, gps_status= 1, gps_status_old= 0;
     uint8_t menu_cnt= 0, menu_cnt_old=1, menu_sel= 1; //menu stuff
-    uint16_t last_lr;
+    uint16_t last_lr= 0;
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t * n, * o;
-    char gps_str[80], gps_line[80], s[5], c;
+    char gps_str[81], gps_line[81], s[5], c;
     char* gps_d[GPS_DATA_MAX], * gps_s;
+    char gsv_sats[GSV_MAX];
+    //char*** gsv_sats;
+
 //    gps_t gps_data= gps_d;
+    //gsv_sats= gsv_sat;
     gps_s= gps_str; //bakup of pointer, save is save;)
 
     n= new;
@@ -821,7 +940,7 @@ int main(void){
                 j= 0;    
                 //uart0_write_str(gps_s);
                 if(*gps_s == '$'){
-                    gps_status= gps_process(gps_s + 1, gps_d);
+                    gps_status= gps_process(gps_s + 1, gps_d, gsv_sats);
                     }
                 break;
                 }
@@ -831,14 +950,16 @@ int main(void){
                 }
 
             if(j > 80){
-                lcd_write_str("ERROR! j > 80!", 0, 7, 1, 0, 0, n);
+                lcd_iwrite_str("ERROR! j > 80!", 0, 7, 1, 0);
                 j= 0;
                 }
             }
       
         if (inc_push){
-            menu_sel= !menu_sel; //change menu or other input switch
             inc_push= 0;
+            menu_sel= !menu_sel; //change menu or other input switch
+            if (menu_sel)
+                inc_lr= menu_cnt; //start at last value
             lcd_clear();
             gps_status= NEW_MENU;
             /*
@@ -860,16 +981,17 @@ int main(void){
                         }
                 }
             }
-        if (menu_sel){
-            if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
+        if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
+            if (menu_sel){
                 //cli();
                 menu_cnt= (uint8_t) inc_lr % MENU_MAX;
                 lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 7, 0, 1);
                 //sei();
-                last_lr= inc_lr;
                 }
+            last_lr= inc_lr;
             }
-        else if(gps_status != DONE) {
+        if(!menu_sel)
+            if(gps_status != DONE) {
             switch(menu_cnt){
             case INFO:
                 switch(gps_status){
@@ -914,7 +1036,20 @@ int main(void){
                     lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
                     }
                 break;
-
+            case GSV:
+                if(gps_status == NEW_GSV){
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//onyl once!
+                        }
+                    gps_display_gsv(gps_d, gsv_sats, (uint8_t)inc_lr);
+                    }
+                if(gps_status == NEW_MENU){
+                    lcd_clear();//yields flickering
+                    lcd_iwrite_str("GSV-menue\nwaiting...", 0, 6, 1, 0);
+                    inc_lr= 0;
+                    }
+                break;
             case LCD:
 /*
                 if(gps_status == NEW_MENU){
