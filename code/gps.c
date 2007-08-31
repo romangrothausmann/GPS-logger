@@ -73,14 +73,16 @@
 #define GSV_MAX 469 //",nn,ee,aaa,ss"=13: x36 + 1 = 469; 31 sats now, changing
 
 #define MAX_SATS 20
+#define MAX_SAT_MAT 64
 
 //Menu defines
 #define INFO   0
 #define GGA    1
+#define SATV   5
 #define GSV    2
 #define UART   3
 #define LCD    4
-#define MENU_MAX 5
+#define MENU_MAX 6
 
 //gps_status 
 #define ERROR    111
@@ -523,9 +525,56 @@ uint8_t lcd_iwrite_str(const char* c, uint8_t col, uint8_t page, uint8_t inv, ui
         }
     return(col);//(oc - c);
     }
-
+/*
 void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a char at x,y
 
+    }
+*/
+void lcd_8way_sym(uint8_t cx, uint8_t cy, uint8_t x, uint8_t y, char inv, uint8_t* m){
+    if (x == 0) {
+        lcd_set_pixel(cx, cy + y, inv, m);
+        lcd_set_pixel(cx, cy - y, inv, m);
+        lcd_set_pixel(cx + y, cy, inv, m);
+        lcd_set_pixel(cx - y, cy, inv, m);
+        } 
+    else if (x == y) {
+        lcd_set_pixel(cx + x, cy + y, inv, m);
+        lcd_set_pixel(cx - x, cy + y, inv, m);
+        lcd_set_pixel(cx + x, cy - y, inv, m);
+        lcd_set_pixel(cx - x, cy - y, inv, m);
+        } 
+    else if (x < y) {
+        lcd_set_pixel(cx + x, cy + y, inv, m);
+        lcd_set_pixel(cx - x, cy + y, inv, m);
+        lcd_set_pixel(cx + x, cy - y, inv, m);
+        lcd_set_pixel(cx - x, cy - y, inv, m);
+        lcd_set_pixel(cx + y, cy + x, inv, m);
+        lcd_set_pixel(cx - y, cy + x, inv, m);
+        lcd_set_pixel(cx + y, cy - x, inv, m);
+        lcd_set_pixel(cx - y, cy - x, inv, m);
+        }
+    }
+
+void lcd_circle(uint8_t r, uint8_t cx, uint8_t cy, char inv,  uint8_t* m){
+    uint8_t x, y; //so r < 256
+    int p; //has to hold -2r up to sqrt(2)/2*r
+
+    x= 0;
+    y= r;
+    p= (5 - r*4)/4;
+
+    lcd_8way_sym(cx, cy, x, y, inv, m);
+    while (x < y) {
+        x++;
+        if (p < 0) {
+            p+= 2*x+1;
+            } 
+        else {
+            y--;
+            p+= 2*(x-y)+1;
+            }
+        lcd_8way_sym(cx, cy, x, y, inv, m);
+        }
     }
 
 void clear_matrix(uint8_t* m){
@@ -632,10 +681,10 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats) {
     return(sat_num); 
     }
 
-void gps_display_gsv(gps_t gps_data, const char* const gsv_sats, uint8_t tsat) {
+void gps_display_gsv(gps_t gps_data, char* const gsv_sats, uint8_t tsat) {
     uint8_t col= 0, i, j, siv;
     char s[4];
-    const char* o;
+    char* o;//const
 
     col= lcd_iputmchar(gps_data[SIV], 2, col, 0, 0);
 //    col= lcd_iwrite_str(itoa(sat_num, s, 10),  col, 0, 0, 0);
@@ -677,47 +726,21 @@ void gps_display_gsv(gps_t gps_data, const char* const gsv_sats, uint8_t tsat) {
         }
     }
 
-char gps_process_gga(char* const o, gps_t gps_data){
-//retruns number of successfully read fields
-//only valid if 10 is returned!
+void gps_process_gga(char* const o, gps_t gps_data){
+    char* s;
 
-    char* t, * s;
     s= o; //keep original pointer unchanged!
-    if(!(t= strchr(s, ',')))
-        return(0);
-    s= gps_data[TIME]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(1);
-    s= gps_data[LAT1]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(2);
-    s= gps_data[LAT2]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(3);
-    s= gps_data[LON1]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(4);
-    s= gps_data[LON2]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(5);
-    s= gps_data[FIX]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(6);
-    s= gps_data[NSAT]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(7);
-    s= gps_data[HDOP]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(8);
-    s= gps_data[GEOID]= t + 1;
-    if(!(t= strchr(s, ',')))
-        return(9);
-    s= t + 1; //skip M
-    if(!(t= strchr(s, ',')))
-        return(9);
-    s= gps_data[WGS84]= t + 1;
-    return(10); 
-    //check hash
+    s= gps_data[TIME]= strchr(s, ',') + 1;
+    s= gps_data[LAT1]= strchr(s, ',') + 1;
+    s= gps_data[LAT2]= strchr(s, ',') + 1;
+    s= gps_data[LON1]= strchr(s, ',') + 1;
+    s= gps_data[LON2]= strchr(s, ',') + 1;
+    s= gps_data[FIX]= strchr(s, ',') + 1;
+    s= gps_data[NSAT]= strchr(s, ',') + 1;
+    s= gps_data[HDOP]= strchr(s, ',') + 1;
+    s= gps_data[GEOID]= strchr(s, ',') + 1;
+    s++; //skip M
+    s= gps_data[WGS84]= strchr(s, ',') + 1;
     }
 
 char gps_det_type(char* s, char* t){
@@ -883,10 +906,35 @@ void zero_gps_data(char* s){
         }
     }
 
+void gps_display_sats(uint8_t sat_matrix [][MAX_SAT_MAT], uint8_t* n){
+    char i;
+/*
+27.5/64
+.42968750000000000000
+47.5/128
+.37109375000000000000
+27.5/last
+74.10526315789473684210
+*/
+
+#define MAX_R 31
+#define CX 31
+#define CY 31
+
+    lcd_set_pixel(CX, CY, 0, n);
+    for(i= 1; i <= 90/30; i++)
+        lcd_circle(MAX_R * i / 3 , CX, CY, 0, n);
+//    for(i= 0; i < 360, i+= 30)
+//        lcd_line(32, 32, i, 32, m);
+    //lcd_fw_matrix(n, n);
+    lcd_write_matrix(n);
+    }
+
 int main(void){
     uint8_t j= 0, lcd_on= 0, gps_status= 1, gps_status_old= 0;
     uint8_t menu_cnt= 0, menu_cnt_old=1, menu_sel= 1; //menu stuff
     uint16_t last_lr= 0;
+    uint8_t sat_matrix [0][0];// [MAX_SAT_MAT][MAX_SAT_MAT];
     uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
     uint8_t * n, * o;
     char gps_str[81], gps_line[81], s[5], c;
@@ -899,7 +947,7 @@ int main(void){
     gps_s= gps_str; //bakup of pointer, save is save;)
 
     n= new;
-    o= old;
+    //o= old;
 
     DDRB= 0x47; //6;  //0100 0110 //lcd on, SI, CK, SS
     DDRE= 0x1C;  //0001 1100 //A0, RST, CS
@@ -912,10 +960,11 @@ int main(void){
     lcd_clear();
     clear_matrix(n);
 
-    uart0_init(UBRR_VAL);
+    uart0_init(UBRR_VAL);//don't forget to do some recieving if IR is on!
     uart1_init(UBRR_VAL);
 
     dreh_init(); //uses timer2; inc_push, inc_lr, pressed
+    inc_lr= 5 * MENU_MAX; // for 0-break
 
     init_gps_data(gps_d);
 /* 
@@ -927,8 +976,11 @@ int main(void){
     //PORTB|= (1 << PB6); //set backlight on
     PORTD|= (1 << PD7);//switch on gps
     lcd_randomize_matrix(n);
-    lcd_write_str("GPS-Logger von RHG\nV11", 0, 3, 0, 0, 0, n);
     lcd_write_matrix(n);
+    lcd_write_str("GPS-Logger von RHG\nV11", 0, 3, 0, 0, 0, n);
+//    lcd_fw_matrix(n, old);
+    clear_matrix(n);
+
     for(;;){
         gps_status= DONE;
         while(uart1_rec){
@@ -959,7 +1011,7 @@ int main(void){
             inc_push= 0;
             menu_sel= !menu_sel; //change menu or other input switch
             if (menu_sel)
-                inc_lr= menu_cnt; //start at last value
+                inc_lr= menu_cnt + 5 * MENU_MAX; //start at last value
             lcd_clear();
             gps_status= NEW_MENU;
             /*
@@ -1036,6 +1088,24 @@ int main(void){
                     lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
                     }
                 break;
+            case SATV:
+/*
+                if(gps_status == NEW_GSV){
+                    if((gps_status_old != gps_status)){
+                        gps_status_old= gps_status;
+                        lcd_clear();//onyl once!
+                        }
+                    gps_display_gsv(gps_d, gsv_sats, (uint8_t)inc_lr);
+                    }
+*/
+
+                if(gps_status == NEW_MENU){
+                    lcd_clear();//yields flickering
+                    gps_display_sats(sat_matrix, n);
+                    inc_lr= 0;
+                    }
+             
+                break;
             case GSV:
                 if(gps_status == NEW_GSV){
                     if((gps_status_old != gps_status)){
@@ -1087,12 +1157,14 @@ int main(void){
     return(0);
     }
 
-/*
+
 ISR(USART0_RX_vect){
     uart0_byte= UDR0;
     uart0_rec= 1;
+    while (!(UCSR1A & (1<<UDRE1))) {} //send to gps
+    UDR1=uart0_byte;
     }
-*/
+
 ISR(USART1_RX_vect){
     cli();
     (u1_ringbuf_index > U_RINGBUF_SIZE - 2) ? u1_ringbuf_index= 0 : u1_ringbuf_index++;
