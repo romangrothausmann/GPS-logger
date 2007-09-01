@@ -6,7 +6,7 @@
 #include <avr/io.h>
 #include <inttypes.h>
 #include <avr/eeprom.h>
-//#include <math.h>
+#include <math.h>
 #include <avr/interrupt.h> 
 #include <util/delay.h>
 #include <avr/pgmspace.h>
@@ -52,7 +52,7 @@
   #error Systematic error: baudrate error > 1% and there for too high! Check if F_CPU is without U! 
 #endif
 
-#define U_RINGBUF_SIZE 2048 //1024
+#define U_RINGBUF_SIZE 80//128//1024
 
 #define TIME   0
 #define LAT1   1
@@ -530,6 +530,23 @@ void lcd_drawchar(char c, uint8_t x, uint8_t y, uint8_t trans, uint8_t* m){//a c
 
     }
 */
+void lcd_4way_sym(uint8_t cx, uint8_t cy, uint8_t x, uint8_t y, char inv, uint8_t* m){
+    if (x == 0) {
+        lcd_set_pixel(cx, cy + y, inv, m);
+        lcd_set_pixel(cx, cy - y, inv, m);
+        } 
+    else if (y == 0) {
+        lcd_set_pixel(cx + x, cy, inv, m);
+        lcd_set_pixel(cx - x, cy, inv, m);
+        } 
+    else {
+        lcd_set_pixel(cx + x, cy + y, inv, m);
+        lcd_set_pixel(cx - x, cy + y, inv, m);
+        lcd_set_pixel(cx + x, cy - y, inv, m);
+        lcd_set_pixel(cx - x, cy - y, inv, m);
+        }
+    }
+
 void lcd_8way_sym(uint8_t cx, uint8_t cy, uint8_t x, uint8_t y, char inv, uint8_t* m){
     if (x == 0) {
         lcd_set_pixel(cx, cy + y, inv, m);
@@ -563,7 +580,7 @@ void lcd_circle(uint8_t r, uint8_t cx, uint8_t cy, char inv,  uint8_t* m){
     y= r;
     p= (5 - r*4)/4;
 
-    lcd_8way_sym(cx, cy, x, y, inv, m);
+    lcd_4way_sym(cx, cy, x, y, inv, m);
     while (x < y) {
         x++;
         if (p < 0) {
@@ -573,10 +590,88 @@ void lcd_circle(uint8_t r, uint8_t cx, uint8_t cy, char inv,  uint8_t* m){
             y--;
             p+= 2*(x-y)+1;
             }
-        lcd_8way_sym(cx, cy, x, y, inv, m);
+        lcd_4way_sym(cx, cy, x, y, inv, m);
         }
     }
 
+void lcd_elips(uint8_t a, uint8_t b, uint8_t mx, uint8_t my, char inv,  uint8_t* m){
+    int x,  mx1,mx2,  my1,my2;
+    long aq,bq, dx,dy, r,rx,ry;
+
+    lcd_set_pixel(mx + a, my, inv, m);
+    lcd_set_pixel(mx - a, my, inv, m);
+
+    mx1= mx - a;
+    my1= my;
+    mx2= mx + a;
+    my2= my;
+
+    aq= a * a; //       {calc sqr}
+    bq= b * b;
+    dx= aq << 1;//               {dx= 2 * a * a}
+    dy= bq << 1;//               {dy= 2 * b * b}
+    r = a * bq; //                {r = a * b * b}
+    rx= r << 1;//                {rx= 2 * a * b * b}
+    ry= 0;//                      {because y = 0}
+    x= a;
+
+    while (x > 0){
+        if (r > 0){
+            // { y + 1 }
+            my1++;
+            my2--;
+            ry+= dx;
+            r-= ry;
+            }
+        if (r <= 0){
+            // { x - 1 }
+            x--;
+            mx1++;
+            mx2--;
+            rx-= dy;
+            r+= rx; 
+            }
+        lcd_set_pixel(mx1, my1, inv, m);
+        lcd_set_pixel(mx1, my2, inv, m);
+        lcd_set_pixel(mx2, my1, inv, m);
+        lcd_set_pixel(mx2, my2, inv, m);
+        }
+    }
+/*
+void lcd_elips(uint8_t a, uint8_t b, uint8_t cx, uint8_t cy, char inv,  uint8_t* m){
+    float x, y; //so r < 256
+    int p; //has to hold -2r up to sqrt(2)/2*r
+
+    x= 0;
+    y= b;
+    p= (5 - b * 4) / 4;
+
+    lcd_4way_sym(cx, cy, x, y, inv, m);
+    while (x < y) {
+        x++;
+        if (p < 0) {
+            p+= (2 * x + 1) / a;
+            } 
+        else {
+            y--;
+            p+= 2 * x / a + 1. / a - 2 * y / b + 1. / b;
+            }
+        lcd_4way_sym(cx, cy, x, y, inv, m);
+        }
+    while (y < x) {
+        y--;
+        if (p < 0) {
+            p+= (2 * x + 1) / a;
+            } 
+        else {
+            y--;
+            p+= 2 * x / a + 1. / a - 2 * y / b + 1. / b;
+            }
+        lcd_4way_sym(cx, cy, x, y, inv, m);
+        }
+
+    }
+*/
 void clear_matrix(uint8_t* m){
     uint16_t i;
     
@@ -590,7 +685,7 @@ void uart0_init(uint16_t baud){//51 for 9600bps
     UBRR0H = baud >> 8;
     UBRR0L = baud & 0xFF;
     UCSR0C|= (3<<UCSZ00);//async, 8N1, see also UCSZn2! (1<<UMSEL0) sync
-    UCSR0B|=  (1<<RXCIE0)|(1<<RXEN0)|(1<<TXEN0); //enable recieve interrupt
+    UCSR0B|= (1<<TXEN0); //enable recieve interrupt
     }
 
 void uart1_init(uint16_t baud){//51 for 9600bps
@@ -708,7 +803,7 @@ void gps_display_gsv(gps_t gps_data, char* const gsv_sats, uint8_t tsat) {
         col= lcd_iwrite_str(itoa(j, s, 10), col, i + 1, 0, 0);
         col= lcd_iwrite_str(": ", col, i + 1 , 0, 0); //better 2x iputchar???
         o= strchr(o, ',') + 1;
-        if(!*o)
+        if(!*o)//from the beginning
             o= gsv_sats + 1;
         col= lcd_iputmchar(o, 2, col, i + 1, 0);
         col= lcd_iputchar(' ', col, i + 1 , 0); //this could go in a for loop
@@ -906,26 +1001,80 @@ void zero_gps_data(char* s){
         }
     }
 
-void gps_display_sats(uint8_t sat_matrix [][MAX_SAT_MAT], uint8_t* n){
-    char i;
+void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT], uint8_t* n){
+    char* s, i, j, o[6], elo;
+    uint8_t num, snr, x, y;
+    int azi, k; //never ever again change this to unsigned or do a cast!!!
 /*
-27.5/64
-.42968750000000000000
-47.5/128
-.37109375000000000000
-27.5/last
-74.10526315789473684210
+  27.5/64
+  .42968750000000000000
+  47.5/128
+  .37109375000000000000
+  27.5/last
+  74.10526315789473684210
+  .42968750000000000000/.37109375000000000000
+  1.15789473684210526315
 */
 
 #define MAX_R 31
 #define CX 31
 #define CY 31
 
+    s= gsv_sats;
+    clear_matrix(n);
     lcd_set_pixel(CX, CY, 0, n);
     for(i= 1; i <= 90/30; i++)
-        lcd_circle(MAX_R * i / 3 , CX, CY, 0, n);
+        //lcd_circle(MAX_R * i / 3 , CX, CY, 0, n);
+        lcd_elips(MAX_R * 1.2 * i / 3, MAX_R  * i / 3, CX * 1.2, CY, 0, n);
 //    for(i= 0; i < 360, i+= 30)
 //        lcd_line(32, 32, i, 32, m);
+
+    while(*s){
+        s= strchr(s, ',') + 1;
+        num= atoi(s);
+        s= strchr(s, ',') + 1;
+        elo= atoi(s);
+        s= strchr(s, ',') + 1;
+        azi= atoi(s);
+        s= strchr(s, ',') + 1;
+        snr= atoi(s);
+        x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI) + CX) * 1.2;
+        y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
+        y+= CY; //separately because of rounding error
+        lcd_set_pixel(x, y, 0, n);
+        lcd_set_pixel(x - 1, y, 0, n);
+        lcd_set_pixel(x - 1, y + 1, 0, n);
+        lcd_set_pixel(x, y + 1, 0, n);
+        for(i= 5; i >= 0; i--)
+            lcd_set_pixel(x + 6 - i, y, !(num & (1 << i)), n);
+        for(i= 0; i < snr / 2; i++)
+            lcd_set_pixel(x + i + 2, y + 1, 0, n);
+        //lcd_iputmchar(
+        }
+/*
+    for(k= 30; k <=270; k+= 30){
+        for(j= 0; j <= 90; j+= 15){
+            num= 21;
+            elo= j;
+            azi= k;
+            //azi= 360;
+            snr= 20;
+            x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI) + CX) * 1.2;
+            y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
+            y+= CY;
+            //lcd_iwrite_str(dtostrf(y, 5, 4, o), 80, j / 15, 1, 1);
+            lcd_set_pixel(x, y, 0, n);
+            lcd_set_pixel(x + 1, y, 0, n);
+            lcd_set_pixel(x - 1, y, 0, n);
+            lcd_set_pixel(x, y + 1, 0, n);
+            lcd_set_pixel(x, y - 1, 0, n);
+            for(i= 4; i >= 0; i--)
+                lcd_set_pixel(x + 6 - i, y, !(num & (1 << i)), n);
+            for(i= 0; i < snr / 2; i++)
+                lcd_set_pixel(x + i + 2, y + 1, 0, n);
+            }
+        }
+*/
     //lcd_fw_matrix(n, n);
     lcd_write_matrix(n);
     }
@@ -1089,20 +1238,17 @@ int main(void){
                     }
                 break;
             case SATV:
-/*
+
                 if(gps_status == NEW_GSV){
                     if((gps_status_old != gps_status)){
                         gps_status_old= gps_status;
                         lcd_clear();//onyl once!
                         }
-                    gps_display_gsv(gps_d, gsv_sats, (uint8_t)inc_lr);
+                    gps_display_sats(gsv_sats, sat_matrix, n);
                     }
-*/
-
                 if(gps_status == NEW_MENU){
                     lcd_clear();//yields flickering
-                    gps_display_sats(sat_matrix, n);
-                    inc_lr= 0;
+                    lcd_iwrite_str("Satelite view\nwaiting...", 0, 6, 1, 0);
                     }
              
                 break;
@@ -1157,14 +1303,14 @@ int main(void){
     return(0);
     }
 
-
+/*
 ISR(USART0_RX_vect){
     uart0_byte= UDR0;
     uart0_rec= 1;
     while (!(UCSR1A & (1<<UDRE1))) {} //send to gps
     UDR1=uart0_byte;
     }
-
+*/
 ISR(USART1_RX_vect){
     cli();
     (u1_ringbuf_index > U_RINGBUF_SIZE - 2) ? u1_ringbuf_index= 0 : u1_ringbuf_index++;
