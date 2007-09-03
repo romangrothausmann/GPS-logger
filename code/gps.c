@@ -1034,7 +1034,7 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
     while(*s){
         sat++;
         //s= strchr(s, ',') + 1;
-        num= atoi(s);
+        num= atoi(s) - 1;
         nums= s;
         s= strchr(s, ',') + 1;
         elo= atoi(s);
@@ -1046,7 +1046,7 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
         x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
         y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
         y+= CY; //separately because of rounding error
-/*
+
         if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
             sat_matrix[num][sat_matrix[num][0][0]][0]= x;
             sat_matrix[num][sat_matrix[num][0][0]][1]= y;
@@ -1054,17 +1054,17 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
             if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
                 sat_matrix[num][0][0]= 1; //0 has the current position!
             }
-*/
+
         lcd_set_pixel(x, y, 0, n);
         for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
-            if(sat_matrix[num - 1][i][0])
-                lcd_set_pixel(sat_matrix[num - 1][i][0], sat_matrix[num - 1][i][1], 0, n);
+            if(sat_matrix[num][i][0])
+                lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
             }
         /*
         lcd_set_pixel(x - 1, y, 0, n);
         lcd_set_pixel(x - 1, y + 1, 0, n);
         lcd_set_pixel(x, y + 1, 0, n);
-        */
+        
         lcd_set_pixel(x + 1, y, 0, n);
         lcd_set_pixel(x - 1, y, 0, n);
         lcd_set_pixel(x, y + 1, 0, n);
@@ -1073,7 +1073,7 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
         lcd_set_pixel(x - 1, y - 1, 1, n);
         lcd_set_pixel(x - 1, y + 1, 1, n);
         lcd_set_pixel(x + 1, y - 1, 1, n);
-
+*/
         if (!sel || sat == sel){
             for(i= 5; i >= 0; i--)
                 lcd_set_pixel(x + 7 - i, y, !(num & (1 << i)), n);
@@ -1284,7 +1284,7 @@ int main(void){
                         gps_status_old= gps_status;
                         lcd_clear();//onyl once!
                         }
-                    gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * siv) % siv : 0,  n);
+                    gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
                     lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
                     }
                 if(gps_status == NEW_MENU){
