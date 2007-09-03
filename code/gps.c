@@ -72,8 +72,8 @@
 
 #define GSV_MAX 469 //",nn,ee,aaa,ss"=13: x36 + 1 = 469; 31 sats now, changing
 
-#define MAX_SATS 20
-#define MAX_SAT_MAT 64
+#define MAX_SATS 31
+#define MAX_SAT_MAT 10
 
 //Menu defines
 #define INFO   0
@@ -773,7 +773,7 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats) {
         lcd_iwrite_str("sat_num != siv", 0, 6, 1, 0);
         return(0);
         }
-    return(sat_num); 
+    return(siv); 
     }
 
 void gps_display_gsv(char* sivs, char* const gsv_sats, uint8_t tsat) {
@@ -1002,10 +1002,11 @@ void zero_gps_data(char* s){
         }
     }
 
-void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT],  uint8_t sel, uint8_t* n){
-    char* s, i, j, o[6], elo, * nums;
+void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2],  uint8_t sel, uint8_t* n){
+    const char* s, * nums;
+    char i, o[6], elo;
     uint8_t num, snr, x, y, sat= 0;
-    int azi, k; //never ever again change this to unsigned or do a cast!!!
+    int azi; //never ever again change this to unsigned or do a cast!!!
 /*
   27.5/64
   .42968750000000000000
@@ -1045,7 +1046,20 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT], 
         x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
         y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
         y+= CY; //separately because of rounding error
+/*
+        if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
+            sat_matrix[num][sat_matrix[num][0][0]][0]= x;
+            sat_matrix[num][sat_matrix[num][0][0]][1]= y;
+            sat_matrix[num][0][0]++;//0 has the current position!
+            if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
+                sat_matrix[num][0][0]= 1; //0 has the current position!
+            }
+*/
         lcd_set_pixel(x, y, 0, n);
+        for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
+            if(sat_matrix[num - 1][i][0])
+                lcd_set_pixel(sat_matrix[num - 1][i][0], sat_matrix[num - 1][i][1], 0, n);
+            }
         /*
         lcd_set_pixel(x - 1, y, 0, n);
         lcd_set_pixel(x - 1, y + 1, 0, n);
@@ -1098,21 +1112,29 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT], 
     }
 
 int main(void){
-    uint8_t j= 0, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv;
-    uint8_t menu_cnt= 0, menu_cnt_old=1, menu_sel= 1; //menu stuff
+    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv;
+    uint8_t menu_cnt= 0, menu_sel= 1; //menu stuff
     uint16_t last_lr= 0;
-    uint8_t sat_matrix [0][0];// [MAX_SAT_MAT][MAX_SAT_MAT];
-    uint8_t  new[LCD_PIXEL_BYTES], old[LCD_PIXEL_BYTES];
-    uint8_t * n, * o;
+    uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
+    uint8_t * n;//, * o;
     char gps_str[81], gps_line[81], s[5], c;
     char* gps_d[GPS_DATA_MAX], * gps_s;
     char gsv_sats[GSV_MAX];
+    uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
     //char*** gsv_sats;
 
 //    gps_t gps_data= gps_d;
     //gsv_sats= gsv_sat;
     gps_s= gps_str; //bakup of pointer, save is save;)
 
+    for(i= 0; i < MAX_SATS; i++){
+        for(j= 1; j < MAX_SAT_MAT; j++){
+            sat_matrix[i][j][0]= 0;
+            sat_matrix[i][j][1]= 0;
+            }
+        sat_matrix[i][0][0]= 1;
+        //sat_matrix[i][j][1]= 0;
+        }
     n= new;
     //o= old;
 
@@ -1263,7 +1285,7 @@ int main(void){
                         lcd_clear();//onyl once!
                         }
                     gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * siv) % siv : 0,  n);
-                    lcd_iputmchar(gps_d[SIV], 2, 80, 5, 1);
+                    lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
                     }
                 if(gps_status == NEW_MENU){
                     lcd_clear();//yields flickering
