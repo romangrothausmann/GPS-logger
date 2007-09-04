@@ -741,7 +741,14 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats, uint8_
 //returns total number of processed sats 
     char* s, * t;
     uint8_t siv, sat_num;
+    const char * nums;
+    char i, elo;
+    uint8_t num, snr, x, y, sat= 0;
+    int azi; //never ever again change this to unsigned or do a cast!!!
 
+#define MAX_R 31
+#define CX 37
+#define CY 31
 
     s= o; //keep original pointer unchanged!
     s= gps_data[NOM]= strchr(s, ',') + 1;
@@ -798,9 +805,9 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats, uint8_
                 sat_matrix[num][0][0]= 1; //0 has the current position!
             sat_matrix[num][sat_matrix[num][0][0]][0]= x;
             sat_matrix[num][sat_matrix[num][0][0]][1]= y;
-            lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
+            //lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
             }
-
+        }
     return(siv); 
     }
 
@@ -1089,7 +1096,7 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
         for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
             if(sat_matrix[num][i][0])
                 lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
-            }
+//            }
         /*
         lcd_set_pixel(x - 1, y, 0, n);
         lcd_set_pixel(x - 1, y + 1, 0, n);
