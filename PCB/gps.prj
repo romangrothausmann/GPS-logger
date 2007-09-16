@@ -1,0 +1,4 @@
+schematics gps_atmega1281_02.sch
+schematics gps_atmega1281-sram_00.sch
+elements-dir ~/hardware/pcb-elements/
+output-name gps
