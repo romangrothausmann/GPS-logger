@@ -38,7 +38,7 @@ HEX_EEPROM_FLAGS += --change-section-lma .eeprom=0 --no-change-warnings
 LIBS = -lm #-lprintf_flt
 
 ## Objects that must be built in order to link
-OBJECTS = gps.o
+OBJECTS = gps.o dos.o fat.o mmc_spi.o dir.o find_x.o
 
 ## Objects explicitly added by the user
 LINKONLYOBJECTS = 

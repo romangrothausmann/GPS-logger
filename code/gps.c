@@ -12,12 +12,12 @@
 #include <avr/pgmspace.h>
 #include "font6x8s.h" //defines prog_char Font [256] [6] 
 #include "drehenc.h"  //defines inc_lr, inc_push, pressed
-/*
+
 #include "dos.h"
 #include "fat.h"
 #include "mmc_spi.h"
 #include "dir.h"
-*/
+
 
 
 #define LCD_SI_PIN  PB2   //only used with manual lcd_write
@@ -72,17 +72,19 @@
 
 #define GSV_MAX 469 //",nn,ee,aaa,ss"=13: x36 + 1 = 469; 31 sats now, changing
 
-#define MAX_SATS 31
-#define MAX_SAT_MAT 30
+#define MAX_SATS 31 //never chage this unless the real sat # changed!
+#define MAX_SAT_MAT 1//30
 
 //Menu defines
 #define INFO   0
 #define GGA    1
-#define SATV   5
-#define GSV    2
-#define UART   3
-#define LCD    4
-#define MENU_MAX 6
+#define SATV   2
+#define GSV    3
+#define CLOSEF 4
+#define SENDF  5
+#define UART   6
+#define LCD    7
+#define MENU_MAX 8
 
 //gps_status 
 #define ERROR    111
@@ -98,6 +100,7 @@ typedef char** gps_t;
 volatile uint8_t uart0_byte, uart0_rec, uart1_rec;
 volatile uint16_t u1_ringbuf_index, u1_ringbuf_last_read;
 volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
+volatile unsigned long bytecount;
 
 void display_gga(gps_t gps_data); 
 void zero_gps_data(char* s);
@@ -978,6 +981,71 @@ void display_gga(gps_t gps_data){
         display_geoid(gps_data[GEOID], 13 * FONT_WIDTH, 0);
        }
 
+void write_str(char* s, char c){
+    uint8_t len, count;
+
+    len= strlen(s);
+    if((count= Fwrite(s,len)) != len)
+        lcd_iwrite_str("Write error!", 0, 6, 0, 0);
+    else
+        bytecount+= count;
+    if(Fwrite(&c,1) != 1)
+        lcd_iwrite_str("Write error of char!", 1 * FONT_WIDTH, 6, 0, 0);
+    else
+        bytecount++;
+    }
+
+
+void log_gga(gps_t gps_data){
+    char tmp[14], * s;
+    uint8_t fdeg;
+    float deg;
+
+    if(*gps_data[LAT1]){
+        strncpy(tmp, gps_data[LAT1], 2);
+        tmp[2]= 0;
+        fdeg= atoi(tmp);
+        strncpy(tmp, gps_data[LAT1] + 3, 7);
+        tmp[7]= 0;
+        deg= atof(tmp); //minutes
+        deg= fdeg + deg / 60;
+        if(*gps_data[LAT2] == 'S')
+            deg= -deg;
+        write_str(dtostrf(deg, 4, 9, tmp), ' ');//one sign, two before . and nine digits afterwards
+        }
+    if(*gps_data[LON1]){
+        strncpy(tmp, gps_data[LAT1], 3);
+        tmp[3]= 0;
+        fdeg= atoi(tmp);
+        strncpy(tmp, gps_data[LAT1] + 4, 7);
+        tmp[7]= 0;
+        deg= atof(tmp); //minutes
+        deg= fdeg + deg / 60;
+        if(*gps_data[LON2] == 'E')
+            deg= -deg;
+        write_str(dtostrf(deg, 5, 9, tmp), ' ');//one sign, three before . and nine digits afterwards
+        }
+    if(*gps_data[GEOID])
+        write_str(gps_data[GEOID], ' ');
+    if(*gps_data[TIME]){
+        s= gps_data[TIME];
+        tmp[0]= *s++; 
+        tmp[1]= *s++;
+        tmp[2]= ':';
+        tmp[3]= *s++;
+        tmp[4]= *s++;
+        tmp[5]= ':';
+        tmp[6]= *s++;
+        tmp[7]= *s++;
+        tmp[8]= 0;
+        write_str(tmp, ' ');
+        }
+    if(*gps_data[NSAT])
+        write_str(gps_data[NSAT], '\n');
+
+    }
+
+
 uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats, uint8_t* const siv, uint8_t sat_matrix [][MAX_SAT_MAT][2]){
     char* t, * h;
     uint8_t cs= 0;
@@ -1150,12 +1218,12 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
     }
 
 int main(void){
-    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv;
+    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv, col= 0;
     uint8_t menu_cnt= 0, menu_sel= 1; //menu stuff
     uint16_t last_lr= 0;
     uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
     uint8_t * n;//, * o;
-    char gps_str[81], gps_line[81], s[5], c;
+    char gps_str[81], gps_line[81], s[5], c, logit, read_buf;
     char* gps_d[GPS_DATA_MAX], * gps_s;
     char gsv_sats[GSV_MAX];
     uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
@@ -1194,10 +1262,10 @@ int main(void){
     inc_lr= 5 * MENU_MAX; // for 0-break
 
     init_gps_data(gps_d);
-/* 
-   lcd_des();
-   MMC_IO_Init();
-*/
+ 
+    lcd_des();
+    MMC_IO_Init();
+
     sei();
 
     //PORTB|= (1 << PB6); //set backlight on
@@ -1207,6 +1275,20 @@ int main(void){
     lcd_write_str("GPS-Logger von RHG\nV11", 0, 3, 0, 0, 0, n);
 //    lcd_fw_matrix(n, old);
     clear_matrix(n);
+
+    if(GetDriveInformation() != F_OK){ // get drive parameters
+        lcd_iwrite_str("MMC not responding!", 0, 4, 1, 1);
+        }
+    else
+        lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
+    logit= 1;
+    if(Fopen("log.txt",F_WRITE) != F_OK){
+        lcd_iwrite_str("Can't open file for writing!", 0, 5, 1, 1);
+        logit= 0;
+        }
+    else
+        lcd_iwrite_str("Opened file for writing!", 0, 5, 1, 1);  
+
 
     for(;;){
         gps_status= DONE;
@@ -1219,7 +1301,7 @@ int main(void){
                 j= 0;    
                 //uart0_write_str(gps_s);
                 if(*gps_s == '$'){
-                    gps_status= gps_process(gps_s + 1, gps_d, gsv_sats, &siv);
+                    gps_status= gps_process(gps_s + 1, gps_d, gsv_sats, &siv, sat_matrix);
                     }
                 break;
                 }
@@ -1249,15 +1331,15 @@ int main(void){
               lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             */
             if (!menu_sel && menu_cnt == LCD){
-                    lcd_on= !lcd_on;
-                    if (lcd_on){
-                         PORTB&= ~(1 << PB6);//set backlight off
-                         lcd_iwrite_str("Backlight off", 0, 6, 1, 1);
-                        }
-                    else {
-                        PORTB|= (1 << PB6);//set backlight on                
-                        lcd_iwrite_str("Backlight on", 0, 6, 1, 1);
-                        }
+                lcd_on= !lcd_on;
+                if (lcd_on){
+                    PORTB&= ~(1 << PB6);//set backlight off
+                    lcd_iwrite_str("Backlight off", 0, 6, 1, 1);
+                    }
+                else {
+                    PORTB|= (1 << PB6);//set backlight on                
+                    lcd_iwrite_str("Backlight on", 0, 6, 1, 1);
+                    }
                 }
             }
         if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
@@ -1269,109 +1351,130 @@ int main(void){
                 }
             last_lr= inc_lr;
             }
+        if(gps_status == NEW_GGA && logit)
+            log_gga(gps_d);
         if(!menu_sel)
             if(gps_status != DONE) {
-            switch(menu_cnt){
-            case INFO:
-                switch(gps_status){
-                case NEW_GGA:
-                    //lcd_clear();//yields flickering
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//yields flickering
-                        }
-                    display_gga(gps_d);
-                    break;
-                case NEW_MENU:
-                    //case WAITING:
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//yields flickering
-                        }
-                    lcd_iwrite_str("Info-menue\nwaiting...", 0, 0, 1, 0);
-                    break; 
+                switch(menu_cnt){
+                case INFO:
+                    switch(gps_status){
+                    case NEW_GGA:
+                        //lcd_clear();//yields flickering
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//yields flickering
+                            }
+                        display_gga(gps_d);
+                        break;
+                    case NEW_MENU:
+                        //case WAITING:
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//yields flickering
+                            }
+                        lcd_iwrite_str("Info-menue\nwaiting...", 0, 0, 1, 0);
+                        break; 
 //                case ERROR: //uncomment when all other done
 //                    lcd_iwrite_str("Info-menue\nError processing gps data!...", 0, 0, 1, 1);
 //                    break;
-                    }
-                //    }
-                break;
-            case GGA:
-                //if(gps_status_old!= gps_status){
-                //    gps_status_old= gps_status;
-                if(gps_status == NEW_GGA){
-                    //lcd_clear();//yields flickering
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//yields flickering
                         }
-                    lcd_iwrite_str(gps_line, 0, 0, 0, 1);
-                    }
-                if(gps_status == NEW_MENU){
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//yields flickering
+                    //    }
+                    break;
+                case GGA:
+                    //if(gps_status_old!= gps_status){
+                    //    gps_status_old= gps_status;
+                    if(gps_status == NEW_GGA){
+                        //lcd_clear();//yields flickering
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//yields flickering
+                            }
+                        lcd_iwrite_str(gps_line, 0, 0, 0, 1);
                         }
-                    lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
-                    }
-                break;
-            case SATV:
+                    if(gps_status == NEW_MENU){
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//yields flickering
+                            }
+                        lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
+                        }
+                    break;
+                case SATV:
 
-                if(gps_status == NEW_GSV){
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//onyl once!
+                    if(gps_status == NEW_GSV){
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//onyl once!
+                            }
+                        gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
+                        lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
                         }
-                    gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
-                    lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
-                    }
-                if(gps_status == NEW_MENU){
-                    lcd_clear();//yields flickering
-                    lcd_iwrite_str("Satelite view\nwaiting...", 0, 6, 1, 0);
-                    inc_lr= 0;
-                    }
+                    if(gps_status == NEW_MENU){
+                        lcd_clear();//yields flickering
+                        lcd_iwrite_str("Satelite view\nwaiting...", 0, 6, 1, 0);
+                        inc_lr= 0;
+                        }
              
-                break;
-            case GSV:
-                if(gps_status == NEW_GSV){
-                    if((gps_status_old != gps_status)){
-                        gps_status_old= gps_status;
-                        lcd_clear();//onyl once!
+                    break;
+                case GSV:
+                    if(gps_status == NEW_GSV){
+                        if((gps_status_old != gps_status)){
+                            gps_status_old= gps_status;
+                            lcd_clear();//onyl once!
+                            }
+                        gps_display_gsv(gps_d[SIV], gsv_sats, (uint8_t)inc_lr);
                         }
-                    gps_display_gsv(gps_d[SIV], gsv_sats, (uint8_t)inc_lr);
-                    }
-                if(gps_status == NEW_MENU){
-                    lcd_clear();//yields flickering
-                    lcd_iwrite_str("GSV-menue\nwaiting...", 0, 6, 1, 0);
-                    inc_lr= 0;
-                    }
-                break;
-            case LCD:
+                    if(gps_status == NEW_MENU){
+                        lcd_clear();//yields flickering
+                        lcd_iwrite_str("GSV-menue\nwaiting...", 0, 6, 1, 0);
+                        inc_lr= 0;
+                        }
+                    break;
+                case LCD:
 /*
-                if(gps_status == NEW_MENU){
-                    lcd_iwrite_str("Backlight on/off", 0, 6, 1, 1);
-                    lcd_on= !lcd_on;
-                    if (lcd_on)
-                        PORTB&= ~(1 << PB6);//set backlight off
-                    else
-                        PORTB|= (1 << PB6);//set backlight on
-                    }
+  if(gps_status == NEW_MENU){
+  lcd_iwrite_str("Backlight on/off", 0, 6, 1, 1);
+  lcd_on= !lcd_on;
+  if (lcd_on)
+  PORTB&= ~(1 << PB6);//set backlight off
+  else
+  PORTB|= (1 << PB6);//set backlight on
+  }
 */
-                break;
-            case UART:
-                //if(gps_status == BAD_CS)
-                //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
-                if(gps_status >= BAD_CS){// NEW_GGA){
-                    lcd_iwrite_str("Writing to UART0", 0, 6, 1, 1);
-                    if(gps_status == BAD_CS)
-                       uart0_write_str("E:"); 
-                    uart0_write_str(gps_line);
+                    break;
+                case UART:
+                    //if(gps_status == BAD_CS)
+                    //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
+                    if(gps_status >= BAD_CS){// NEW_GGA){
+                        lcd_iwrite_str("Writing to UART0", 0, 6, 1, 1);
+                        if(gps_status == BAD_CS)
+                            uart0_write_str("E:"); 
+                        uart0_write_str(gps_line);
+                        }
+                    break;
+                case CLOSEF:
+                    Fclose();
+                    logit= 0;
+                    lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
+                    break;
+                case SENDF:
+                    //if(gps_status == BAD_CS)
+                    //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
+                    if(Fopen("log.txt",F_READ) != F_OK)
+                        lcd_iwrite_str("Can't open file for reading!", 0, 5, 1, 1);
+                    lcd_iwrite_str("Writing file to UART0", 0, 6, 1, 1);
+                    while(Fread(&read_buf, 1))
+                        {
+                        while (!(UCSR0A & (1<<UDRE0))) {}
+                        UDR0=read_buf;
+                        lcd_iset_byte(1,0,col++,0);
+                        }
+                    lcd_iwrite_str("Writing file finished", 0, 6, 1, 1);                          
+                    break;
+                default:
+                    lcd_iwrite_str("Menu not known!", 0, 7, 1, 1);
                     }
-                break;
-            default:
-                lcd_iwrite_str("Menu not known!", 0, 7, 1, 1);
-                }
-            } 
+                } 
 /*
   if(pressed)
   PORTB|= (1 << PB6);//set backlight on
