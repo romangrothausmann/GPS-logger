@@ -1001,16 +1001,18 @@ void write_str(char* s, char c){
 
 
 void log_gga(gps_t gps_data){
-    char tmp[14], * s;
+    char tmp[15], * s;
     uint8_t fdeg;
     float deg;
 
     if(*gps_data[LAT1]){
         strncpy(tmp, gps_data[LAT1], 2);
         tmp[2]= 0;
+        lcd_iwrite_str(tmp, 0, 4, 0, 0);
         fdeg= atoi(tmp);
-        strncpy(tmp, gps_data[LAT1] + 3, 7);
+        strncpy(tmp, gps_data[LAT1] + 2, 7);
         tmp[7]= 0;
+        lcd_iwrite_str(tmp, 0, 5, 0, 0);
         deg= atof(tmp); //minutes
         deg= fdeg + deg / 60;
         if(*gps_data[LAT2] == 'S')
@@ -1020,16 +1022,18 @@ void log_gga(gps_t gps_data){
         write_str(tmp, ' ');//one sign, two before . and nine digits afterwards
         }
     if(*gps_data[LON1]){
-        strncpy(tmp, gps_data[LAT1], 3);
+        strncpy(tmp, gps_data[LON1], 3);
         tmp[3]= 0;
+        //lcd_iwrite_str(tmp, 0, 4, 0, 0);
         fdeg= atoi(tmp);
-        strncpy(tmp, gps_data[LAT1] + 4, 7);
+        strncpy(tmp, gps_data[LON1] + 3, 7);
         tmp[7]= 0;
+        //lcd_iwrite_str(tmp, 0, 5, 0, 0);
         deg= atof(tmp); //minutes
         deg= fdeg + deg / 60;
         if(*gps_data[LON2] == 'W')
             deg= -deg;
-        dtostrf(deg, 5, 8, tmp);
+        dtostrf(deg, 5, 9, tmp);
         //lcd_iwrite_str(tmp, 0, 5, 0, 0);
         write_str(tmp, ' ');//one sign, three before . and nine digits afterwards
         }
@@ -1144,60 +1148,62 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
 //    for(i= 0; i < 360, i+= 30)
 //        lcd_line(32, 32, i, 32, m);
 /*
-    s= strchr(s, ',') + 1;
-    while(*s){
-        sat++;
-        //s= strchr(s, ',') + 1;
-        num= atoi(s) - 1;
-        nums= s;
-        s= strchr(s, ',') + 1;
-        elo= atoi(s);
-        s= strchr(s, ',') + 1;
-        azi= atoi(s);
-        s= strchr(s, ',') + 1;
-        snr= atoi(s);
-        s= strchr(s, ',') + 1;
-        x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
-        y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
-        y+= CY; //separately because of rounding error
+  s= strchr(s, ',') + 1;
+  while(*s){
+  sat++;
+  //s= strchr(s, ',') + 1;
+  num= atoi(s) - 1;
+  nums= s;
+  s= strchr(s, ',') + 1;
+  elo= atoi(s);
+  s= strchr(s, ',') + 1;
+  azi= atoi(s);
+  s= strchr(s, ',') + 1;
+  snr= atoi(s);
+  s= strchr(s, ',') + 1;
+  x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
+  y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
+  y+= CY; //separately because of rounding error
 
-        if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
-            sat_matrix[num][0][0]++;//0 has the current position!
-            if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
-                sat_matrix[num][0][0]= 1; //0 has the current position!
-            sat_matrix[num][sat_matrix[num][0][0]][0]= x;
-            sat_matrix[num][sat_matrix[num][0][0]][1]= y;
-            lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
-            }
+  if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
+  sat_matrix[num][0][0]++;//0 has the current position!
+  if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
+  sat_matrix[num][0][0]= 1; //0 has the current position!
+  sat_matrix[num][sat_matrix[num][0][0]][0]= x;
+  sat_matrix[num][sat_matrix[num][0][0]][1]= y;
+  lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
+  }
 */
 //        lcd_set_pixel(x, y, 0, n);
-        for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
-            if(sat_matrix[num][i][0])
-                lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
-//            }
-        /*
-        lcd_set_pixel(x - 1, y, 0, n);
-        lcd_set_pixel(x - 1, y + 1, 0, n);
-        lcd_set_pixel(x, y + 1, 0, n);
-        */        
-        lcd_set_pixel(x + 1, y, 0, n);
-        lcd_set_pixel(x - 1, y, 0, n);
-        lcd_set_pixel(x, y + 1, 0, n);
-        lcd_set_pixel(x, y - 1, 0, n);
-/*
-        lcd_set_pixel(x + 1, y + 1, 1, n);
-        lcd_set_pixel(x - 1, y - 1, 1, n);
-        lcd_set_pixel(x - 1, y + 1, 1, n);
-        lcd_set_pixel(x + 1, y - 1, 1, n);
-*/
-        if (!sel || sat == sel){
-            for(i= 5; i >= 0; i--)
-                lcd_set_pixel(x + 7 - i, y, !(num & (1 << i)), n);
-            for(i= 0; i < snr / 2; i++)
-                lcd_set_pixel(x + i + 3, y + 1, 0, n);
-            //lcd_write_str(nums, 90, 6, 0, 1, 0, n);
-            }
+    for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
+        if(sat_matrix[num][i][0])
+            lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
         }
+    x= sat_matrix[num][sat_matrix[num][0][0]][0];
+    y= sat_matrix[num][sat_matrix[num][0][0]][1];
+    /*
+      lcd_set_pixel(x - 1, y, 0, n);
+      lcd_set_pixel(x - 1, y + 1, 0, n);
+      lcd_set_pixel(x, y + 1, 0, n);
+    */        
+    lcd_set_pixel(x + 1, y, 0, n);
+    lcd_set_pixel(x - 1, y, 0, n);
+    lcd_set_pixel(x, y + 1, 0, n);
+    lcd_set_pixel(x, y - 1, 0, n);
+/*
+  lcd_set_pixel(x + 1, y + 1, 1, n);
+  lcd_set_pixel(x - 1, y - 1, 1, n);
+  lcd_set_pixel(x - 1, y + 1, 1, n);
+  lcd_set_pixel(x + 1, y - 1, 1, n);
+*/
+    if (!sel || sat == sel){
+        for(i= 5; i >= 0; i--)
+            lcd_set_pixel(x + 7 - i, y, !(num & (1 << i)), n);
+        for(i= 0; i < snr / 2; i++)
+            lcd_set_pixel(x + i + 3, y + 1, 0, n);
+        //lcd_write_str(nums, 90, 6, 0, 1, 0, n);
+        }
+    
 /*
   for(k= 30; k <=270; k+= 30){
   for(j= 0; j <= 90; j+= 15){
