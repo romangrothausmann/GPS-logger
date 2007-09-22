@@ -13,11 +13,10 @@
 #include "font6x8s.h" //defines prog_char Font [256] [6] 
 #include "drehenc.h"  //defines inc_lr, inc_push, pressed
 
-#include "dos.h"
-#include "fat.h"
 #include "mmc_spi.h"
+#include "fat.h"
+#include "dos.h"
 #include "dir.h"
-
 
 
 #define LCD_SI_PIN  PB2   //only used with manual lcd_write
@@ -33,8 +32,8 @@
 #define LCD_PIXEL_BYTES 1024
 #define lcd_sel() { LCD_CS_PORT&= ~(1 << LCD_CS_PIN); } //select chip
 #define lcd_des() { LCD_CS_PORT|=  (1 << LCD_CS_PIN); } //deselect chip
-#define sbi(portn, bitn) asm volatile("sbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
-#define cbi(portn, bitn) asm volatile("cbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
+//#define sbi(portn, bitn) asm volatile("sbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
+//#define cbi(portn, bitn) asm volatile("cbi %0, %1" : : "I" (_SFR_IO_ADDR(portn)), "I" ((uint8_t)(bitn)))
 
 
 #ifndef F_CPU
@@ -100,7 +99,7 @@ typedef char** gps_t;
 volatile uint8_t uart0_byte, uart0_rec, uart1_rec;
 volatile uint16_t u1_ringbuf_index, u1_ringbuf_last_read;
 volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
-volatile unsigned long bytecount;
+//volatile unsigned long bytecount;
 
 void display_gga(gps_t gps_data); 
 void zero_gps_data(char* s);
@@ -188,6 +187,10 @@ void lcd_des(void){
 
 void lcd_write(uint8_t byte, uint8_t type){ 
 //manual SPI, slower! DON'T forget to set DDRB, DDRE!!!
+    char spcr;
+
+    spcr= SPCR;
+    SPCR= 0; //(1 << SPE) | (1 << MSTR) | (1 << CPHA) | (1 << CPOL) | (3 << SPR0); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
 
     char i;
     if (type)
@@ -202,6 +205,7 @@ void lcd_write(uint8_t byte, uint8_t type){
         LCD_CK_PORT|= (1 << LCD_CK_PIN); //validate SI with rising edge
         LCD_CK_PORT&= ~(1  << LCD_CK_PIN);
         }
+    SPCR= spcr;
     }
 
 /*
@@ -903,7 +907,7 @@ void display_time(char* time, uint8_t col, uint8_t page){
 
 void display_lat(const char* lat1, const char* lat2, uint8_t col, const uint8_t page){
     const char* s;
-    char sec_s[8];
+    char sec_s[9];
     float sec; 
 
     s= lat1;
@@ -931,7 +935,7 @@ void display_lat(const char* lat1, const char* lat2, uint8_t col, const uint8_t 
 
 void display_lon(const char* lon1, const char* lon2, uint8_t col, const uint8_t page){
     const char* s;
-    char sec_s[8];
+    char sec_s[9];
     float sec; 
 
     s= lon1;
@@ -986,13 +990,13 @@ void write_str(char* s, char c){
 
     len= strlen(s);
     if((count= Fwrite(s,len)) != len)
-        lcd_iwrite_str("Write error!", 0, 6, 0, 0);
-    else
-        bytecount+= count;
+        lcd_iwrite_str("Write error!", 0, 4, 0, 0);
+    //else
+//    bytecount+= count;
     if(Fwrite(&c,1) != 1)
-        lcd_iwrite_str("Write error of char!", 1 * FONT_WIDTH, 6, 0, 0);
-    else
-        bytecount++;
+        lcd_iwrite_str("Write error of char!", 1 * FONT_WIDTH, 5, 0, 0);
+    //else
+//    bytecount++;
     }
 
 
@@ -1011,7 +1015,9 @@ void log_gga(gps_t gps_data){
         deg= fdeg + deg / 60;
         if(*gps_data[LAT2] == 'S')
             deg= -deg;
-        write_str(dtostrf(deg, 4, 9, tmp), ' ');//one sign, two before . and nine digits afterwards
+        dtostrf(deg, 4, 9, tmp);
+        //lcd_iwrite_str(tmp, 0, 4, 0, 0);
+        write_str(tmp, ' ');//one sign, two before . and nine digits afterwards
         }
     if(*gps_data[LON1]){
         strncpy(tmp, gps_data[LAT1], 3);
@@ -1021,11 +1027,14 @@ void log_gga(gps_t gps_data){
         tmp[7]= 0;
         deg= atof(tmp); //minutes
         deg= fdeg + deg / 60;
-        if(*gps_data[LON2] == 'E')
+        if(*gps_data[LON2] == 'W')
             deg= -deg;
-        write_str(dtostrf(deg, 5, 9, tmp), ' ');//one sign, three before . and nine digits afterwards
+        dtostrf(deg, 5, 8, tmp);
+        //lcd_iwrite_str(tmp, 0, 5, 0, 0);
+        write_str(tmp, ' ');//one sign, three before . and nine digits afterwards
         }
     if(*gps_data[GEOID])
+        //lcd_iwrite_str(gps_data[GEOID], 0, 4, 0, 0);
         write_str(gps_data[GEOID], ' ');
     if(*gps_data[TIME]){
         s= gps_data[TIME];
@@ -1041,6 +1050,7 @@ void log_gga(gps_t gps_data){
         write_str(tmp, ' ');
         }
     if(*gps_data[NSAT])
+        //lcd_iwrite_str(gps_data[NSAT], 0, 4, 0, 0);
         write_str(gps_data[NSAT], '\n');
 
     }
@@ -1218,9 +1228,9 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
     }
 
 int main(void){
-    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv, col= 0;
+    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv, col= 0, closed;
     uint8_t menu_cnt= 0, menu_sel= 1; //menu stuff
-    uint16_t last_lr= 0;
+    uint16_t last_lr= 0, send_bytes;
     uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
     uint8_t * n;//, * o;
     char gps_str[81], gps_line[81], s[5], c, logit, read_buf;
@@ -1251,6 +1261,8 @@ int main(void){
 
     PORTD|=  (7 << PD4); //swith on pull-up 
 
+    MMC_IO_Init();
+
     lcd_init(); // must be executed at the very beginning!
     lcd_clear();
     clear_matrix(n);
@@ -1264,7 +1276,7 @@ int main(void){
     init_gps_data(gps_d);
  
     lcd_des();
-    MMC_IO_Init();
+    //MMC_IO_Init();
 
     sei();
 
@@ -1280,13 +1292,34 @@ int main(void){
         lcd_iwrite_str("MMC not responding!", 0, 4, 1, 1);
         }
     else
+        //PORTB|= (1 << PB6); //set backlight on
         lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
+    Fremove("test.txt");//FindName("test.txt");
+    if(Fopen("test.txt",F_WRITE) != F_OK){
+        lcd_iwrite_str("Can't open file for w!", 0, 0, 1, 1);
+        logit= 0;
+//        bytecount= 0;
+        }
+    else{
+        char c;
+        lcd_iwrite_str("Opened file for w!", 0, 1, 1, 1);
+        c= Fwrite("Hello World on MMC!\n", 20);
+//        bytecount= c;
+        c= Fwrite("Hello World on MMC again!\n", 26);
+        Fclose();
+        lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
+        }
+
+
+    Fremove("log.txt");
     logit= 1;
     if(Fopen("log.txt",F_WRITE) != F_OK){
-        lcd_iwrite_str("Can't open file for writing!", 0, 5, 1, 1);
+        lcd_iwrite_str("Can't open file for w!", 0, 5, 1, 1);
         logit= 0;
+//        bytecount= 0;
         }
     else
+        //PORTB&= ~(1 << PB6); //set backlight off
         lcd_iwrite_str("Opened file for writing!", 0, 5, 1, 1);  
 
 
@@ -1330,7 +1363,9 @@ int main(void){
               col= lcd_iwrite_str("UTC: ", 3, 6, 0, 0);
               lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             */
-            if (!menu_sel && menu_cnt == LCD){
+            ///////Here the on/off Menus!
+            if (menu_cnt == LCD){
+                menu_sel= 1;
                 lcd_on= !lcd_on;
                 if (lcd_on){
                     PORTB&= ~(1 << PB6);//set backlight off
@@ -1340,6 +1375,27 @@ int main(void){
                     PORTB|= (1 << PB6);//set backlight on                
                     lcd_iwrite_str("Backlight on", 0, 6, 1, 1);
                     }
+                }
+            if (menu_cnt == CLOSEF){
+                menu_sel= 1;
+                if (closed){
+                    if(Fopen("log.txt",F_WRITE) != F_OK){
+                        lcd_iwrite_str("Can't open file for w!", 0, 5, 1, 1);
+                        logit= 0;
+//        bytecount= 0;
+                        }
+                    else{
+                        logit= 1;
+                        lcd_iwrite_str("Started loggin!", 0, 5, 1, 1);
+                        }
+                    }
+                else {
+                    Fclose();
+                    logit= 0;
+                    lcd_iwrite_str("Stopped logging!", 0, 5, 1, 1);
+                    }
+                closed= !closed;
+
                 }
             }
         if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
@@ -1453,23 +1509,40 @@ int main(void){
                         }
                     break;
                 case CLOSEF:
-                    Fclose();
-                    logit= 0;
-                    lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
+/*
+                    if(gps_status == NEW_MENU){
+
+                        Fclose();
+                        logit= 0;
+                        lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
+                        }
+*/
                     break;
                 case SENDF:
-                    //if(gps_status == BAD_CS)
-                    //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
-                    if(Fopen("log.txt",F_READ) != F_OK)
-                        lcd_iwrite_str("Can't open file for reading!", 0, 5, 1, 1);
-                    lcd_iwrite_str("Writing file to UART0", 0, 6, 1, 1);
-                    while(Fread(&read_buf, 1))
-                        {
-                        while (!(UCSR0A & (1<<UDRE0))) {}
-                        UDR0=read_buf;
-                        lcd_iset_byte(1,0,col++,0);
+                    if(gps_status == NEW_MENU){
+
+                        Fclose();
+                        logit= 0;
+                        closed= 1;
+                        lcd_iwrite_str("Stopped logging", 0, 0, 1, 1);
+                        if(Fopen("log.txt",F_READ) != F_OK)
+                            lcd_iwrite_str("Can't open file for r!", 0, 5, 1, 1);
+                        else {
+                            lcd_iwrite_str("Writing file to UART0", 0, 1, 1, 1);
+                            send_bytes= 0;
+                            while(Fread(&read_buf, 1))
+                                {
+                                while (!(UCSR0A & (1<<UDRE0))) {}
+                                UDR0=read_buf;
+                                send_bytes++;
+                                //lcd_iset_byte(1,0,col++,0);
+                                }
+                            lcd_iwrite_str(" Bytes written!", lcd_iwrite_str(itoa(send_bytes, s, 10), 0, 2, 1, 1), 2, 1, 1);                          
+                            }
+                        Fclose();
                         }
-                    lcd_iwrite_str("Writing file finished", 0, 6, 1, 1);                          
+                    else
+                        lcd_iwrite_str("Writing file done!", 0, 6, 1, 1);
                     break;
                 default:
                     lcd_iwrite_str("Menu not known!", 0, 7, 1, 1);
