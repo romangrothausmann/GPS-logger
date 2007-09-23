@@ -101,6 +101,17 @@ volatile uint16_t u1_ringbuf_index, u1_ringbuf_last_read;
 volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
 //volatile unsigned long bytecount;
 
+prog_char MenuStrs [8] [15] = { //max 21
+    {"Info-Menu"},
+    {"GGA-Messages"},
+    {"Satelite view"},
+    {"Satelite list"},
+    {"Change logging"},
+    {"Transmit file"},
+    {"Log to UART"},
+    {"Light on/off"},
+    };
+
 void display_gga(gps_t gps_data); 
 void zero_gps_data(char* s);
 
@@ -521,6 +532,42 @@ uint8_t lcd_iwrite_str(const char* c, uint8_t col, uint8_t page, uint8_t inv, ui
         if (page > 7)
             break;
         col= lcd_iputchar(*oc, col, page, inv);
+        oc++;
+        }
+    if(clear){
+        colc= col;
+        while (colc < 128){
+            lcd_iset_byte(0, colc, page, inv);
+            colc++;
+            }
+        }
+    return(col);//(oc - c);
+    }
+
+uint8_t lcd_iwrite_strp(const char* s, uint8_t col, uint8_t page, uint8_t inv, uint8_t clear ){//returns absolute cols [//returns displayed chars]
+//display a string, needs no write, use' \n'!
+    uint8_t colc;
+    const char* oc;
+    char c;
+
+    oc= s; //for 6x8 there can be 168 full chars on the display
+    while(c= pgm_read_byte(oc)){
+        if (c == '\n'){
+            page++;
+            col= 0;
+            oc++;
+            }
+        //more controle keys need to be implemented:(
+
+        if (col > 127 - FONT_WIDTH){//line wrap, only full letters here!
+            col= 0;
+            page++;
+            if (c == ' ')//skip space if line wraped
+                oc++;
+            }
+        if (page > 7)
+            break;
+        col= lcd_iputchar(c, col, page, inv);
         oc++;
         }
     if(clear){
@@ -1298,8 +1345,9 @@ int main(void){
         lcd_iwrite_str("MMC not responding!", 0, 4, 1, 1);
         }
     else
-        //PORTB|= (1 << PB6); //set backlight on
         lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
+
+/*
     Fremove("test.txt");//FindName("test.txt");
     if(Fopen("test.txt",F_WRITE) != F_OK){
         lcd_iwrite_str("Can't open file for w!", 0, 0, 1, 1);
@@ -1315,17 +1363,18 @@ int main(void){
         Fclose();
         lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
         }
-
+*/
 
     Fremove("log.txt");
     logit= 1;
+    closed= 0;
     if(Fopen("log.txt",F_WRITE) != F_OK){
         lcd_iwrite_str("Can't open file for w!", 0, 5, 1, 1);
         logit= 0;
+        closed= 1;
 //        bytecount= 0;
         }
     else
-        //PORTB&= ~(1 << PB6); //set backlight off
         lcd_iwrite_str("Opened file for writing!", 0, 5, 1, 1);  
 
 
@@ -1370,45 +1419,59 @@ int main(void){
               lcd_iwrite_str(itoa(col, s, 10), col, 7, 0, 1);
             */
             ///////Here the on/off Menus!
-            if (menu_cnt == LCD){
+            switch (menu_cnt){
+            case LCD:
                 menu_sel= 1;
-                lcd_on= !lcd_on;
                 if (lcd_on){
                     PORTB&= ~(1 << PB6);//set backlight off
-                    lcd_iwrite_str("Backlight off", 0, 6, 1, 1);
+                    lcd_iwrite_str("Backlight off", 0, 0, 1, 1);
                     }
                 else {
                     PORTB|= (1 << PB6);//set backlight on                
-                    lcd_iwrite_str("Backlight on", 0, 6, 1, 1);
+                    lcd_iwrite_str("Backlight on", 0, 0, 1, 1);
                     }
-                }
-            if (menu_cnt == CLOSEF){
+                lcd_on= !lcd_on;
+                break;
+            case CLOSEF:
                 menu_sel= 1;
                 if (closed){
                     if(Fopen("log.txt",F_WRITE) != F_OK){
-                        lcd_iwrite_str("Can't open file for w!", 0, 5, 1, 1);
+                        lcd_iwrite_str("Can't open file for w!", 0, 4, 1, 1);
                         logit= 0;
 //        bytecount= 0;
                         }
                     else{
                         logit= 1;
-                        lcd_iwrite_str("Started loggin!", 0, 5, 1, 1);
+                        lcd_iwrite_str("Started loggin!", 0, 0, 1, 1);
                         }
                     }
                 else {
                     Fclose();
                     logit= 0;
-                    lcd_iwrite_str("Stopped logging!", 0, 5, 1, 1);
+                    lcd_iwrite_str("Stopped logging!", 0, 0, 1, 1);
                     }
                 closed= !closed;
 
+                break;
+                }
+            if (menu_sel){
+                lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
+                lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                 }
             }
+/****This is checked each loop and there for to often
+*****It's now in turn and push checks
+        if (menu_sel){
+            lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
+            lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
+            }
+*/
         if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
             if (menu_sel){
                 //cli();
                 menu_cnt= (uint8_t) inc_lr % MENU_MAX;
-                lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 7, 0, 1);
+                lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
+                lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                 //sei();
                 }
             last_lr= inc_lr;
@@ -1445,51 +1508,55 @@ int main(void){
                 case GGA:
                     //if(gps_status_old!= gps_status){
                     //    gps_status_old= gps_status;
-                    if(gps_status == NEW_GGA){
+                    switch(gps_status){
+                    case NEW_GGA:
                         //lcd_clear();//yields flickering
                         if((gps_status_old != gps_status)){
                             gps_status_old= gps_status;
                             lcd_clear();//yields flickering
                             }
                         lcd_iwrite_str(gps_line, 0, 0, 0, 1);
-                        }
-                    if(gps_status == NEW_MENU){
+                        break;
+                    case NEW_MENU:
                         if((gps_status_old != gps_status)){
                             gps_status_old= gps_status;
                             lcd_clear();//yields flickering
                             }
                         lcd_iwrite_str("GGA-menue\nwaiting...", 0, 6, 1, 0);
+                        break;
                         }
                     break;
                 case SATV:
-
-                    if(gps_status == NEW_GSV){
+                    switch(gps_status){
+                    case NEW_GSV:
                         if((gps_status_old != gps_status)){
                             gps_status_old= gps_status;
                             lcd_clear();//onyl once!
                             }
                         gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
                         lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
-                        }
-                    if(gps_status == NEW_MENU){
+                        break;
+                    case NEW_MENU:
                         lcd_clear();//yields flickering
                         lcd_iwrite_str("Satelite view\nwaiting...", 0, 6, 1, 0);
                         inc_lr= 0;
+                        break;
                         }
-             
                     break;
                 case GSV:
-                    if(gps_status == NEW_GSV){
+                    switch(gps_status){
+                    case NEW_GSV:
                         if((gps_status_old != gps_status)){
                             gps_status_old= gps_status;
                             lcd_clear();//onyl once!
                             }
                         gps_display_gsv(gps_d[SIV], gsv_sats, (uint8_t)inc_lr);
-                        }
-                    if(gps_status == NEW_MENU){
+                        break;
+                    case NEW_MENU:
                         lcd_clear();//yields flickering
                         lcd_iwrite_str("GSV-menue\nwaiting...", 0, 6, 1, 0);
                         inc_lr= 0;
+                        break;
                         }
                     break;
                 case LCD:
