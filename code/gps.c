@@ -195,13 +195,13 @@ void lcd_des(void){
     setpin(LCD_CS_PORT, LCD_CS_PIN, 1); //deselect chip
     }
 */
-
+/*
 void lcd_write(uint8_t byte, uint8_t type){ 
 //manual SPI, slower! DON'T forget to set DDRB, DDRE!!!
     char spcr;
 
     spcr= SPCR;
-    SPCR= 0; //(1 << SPE) | (1 << MSTR) | (1 << CPHA) | (1 << CPOL) | (3 << SPR0); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
+    SPCR= 0;
 
     char i;
     if (type)
@@ -218,23 +218,24 @@ void lcd_write(uint8_t byte, uint8_t type){
         }
     SPCR= spcr;
     }
+*/
 
-/*
 void lcd_write(uint8_t byte, uint8_t type){
  //for internal SPI
+    char spcr;
 
-    //LCD_CS_PORT&= ~(1 << LCD_CS_PIN);
+    spcr= SPCR;
     if (type) //set A0
         LCD_A0_PORT|=  (1 << LCD_A0_PIN);
     else
         LCD_A0_PORT&= ~(1 << LCD_A0_PIN);
-    //SPCR= 0x53; //0101 0011
-    SPCR|= (1 << SPE) | (1 << MSTR) | (1 << CPHA) | (1 << CPOL) | (3 << SPR0); //DORD, CPOL, CPHA, SPR1, SPR0; f/4
-//    SPSR|= (1 << SPI2X); //SCK/2
+    SPCR = (1<<SPE)|(1<<MSTR);//|(1<<SPR0); //f_cpu/4
+    SPSR|= (1 << SPI2X); //SCK/2
     SPDR= byte;
-    //LCD_CS_PORT|=  (1 << LCD_CS_PIN);
+    while(!(SPSR & (1<<SPIF)));
+    SPCR= spcr;
     }
-*/
+
 void lcd_command(uint8_t byte){ //only good if optimizeable!
 
     lcd_write(byte, 0);
@@ -551,7 +552,7 @@ uint8_t lcd_iwrite_strp(const char* s, uint8_t col, uint8_t page, uint8_t inv, u
     char c;
 
     oc= s; //for 6x8 there can be 168 full chars on the display
-    while(c= pgm_read_byte(oc)){
+    while((c= pgm_read_byte(oc))){
         if (c == '\n'){
             page++;
             col= 0;
@@ -791,12 +792,12 @@ void uart0_write_str(char* s){
     while(!(UCSR0A & (1<<TXC0))) {}        
     }
 
-char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2]) {
+char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats){//, uint8_t sat_matrix [][MAX_SAT_MAT][2]) {
 //returns total number of processed sats 
     char* s, * t;
     uint8_t siv, sat_num;
     const char * nums;
-    char i, elo;
+    char elo;
     uint8_t num, snr, x, y, sat= 0;
     int azi; //never ever again change this to unsigned or do a cast!!!
 
@@ -852,7 +853,7 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats, uint8_
         x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
         y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
         y+= CY; //separately because of rounding error
-
+/*
         if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
             sat_matrix[num][0][0]++;//0 has the current position!
             if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
@@ -861,6 +862,7 @@ char gps_process_gsv(char* const o, gps_t gps_data, char* const gsv_sats, uint8_
             sat_matrix[num][sat_matrix[num][0][0]][1]= y;
             //lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
             }
+*/
         }
     return(siv); 
     }
@@ -1036,11 +1038,11 @@ void write_str(char* s, char c){
     uint8_t len, count;
 
     len= strlen(s);
-    if((count= Fwrite(s,len)) != len)
+    if((count= Fwrite((uint8_t*)s,len)) != len)
         lcd_iwrite_str("Write error!", 0, 4, 0, 0);
     //else
 //    bytecount+= count;
-    if(Fwrite(&c,1) != 1)
+    if(Fwrite((uint8_t*)&c,1) != 1)
         lcd_iwrite_str("Write error of char!", 1 * FONT_WIDTH, 5, 0, 0);
     //else
 //    bytecount++;
@@ -1055,11 +1057,11 @@ void log_gga(gps_t gps_data){
     if(*gps_data[LAT1]){
         strncpy(tmp, gps_data[LAT1], 2);
         tmp[2]= 0;
-        lcd_iwrite_str(tmp, 0, 4, 0, 0);
+        //lcd_iwrite_str(tmp, 0, 4, 0, 0);
         fdeg= atoi(tmp);
         strncpy(tmp, gps_data[LAT1] + 2, 7);
         tmp[7]= 0;
-        lcd_iwrite_str(tmp, 0, 5, 0, 0);
+        //lcd_iwrite_str(tmp, 0, 5, 0, 0);
         deg= atof(tmp); //minutes
         deg= fdeg + deg / 60;
         if(*gps_data[LAT2] == 'S')
@@ -1107,7 +1109,7 @@ void log_gga(gps_t gps_data){
     }
 
 
-uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats, uint8_t* const siv, uint8_t sat_matrix [][MAX_SAT_MAT][2]){
+uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats, uint8_t* const siv){//, uint8_t sat_matrix [][MAX_SAT_MAT][2]){
     char* t, * h;
     uint8_t cs= 0;
     char sum[3];
@@ -1130,7 +1132,7 @@ uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats, uint8_t* cons
         return(NEW_GGA);
         }
     if(gps_det_type(s, "GPGSV")){ 
-        if((*siv= gps_process_gsv(s, gps_data, gsv_sats, sat_matrix)))
+        if((*siv= gps_process_gsv(s, gps_data, gsv_sats)))//, sat_matrix)))
             return(NEW_GSV);
         //else
         //    return(GSV_UNF);
@@ -1166,8 +1168,8 @@ void zero_gps_data(char* s){
         }
     }
 
-void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2],  uint8_t sel, uint8_t* n){
-    const char* s, * nums;
+//void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2],  uint8_t sel, uint8_t* n){
+void gps_display_sats(const char* gsv_sats, uint8_t sel, uint8_t* n){    const char* s, * nums;
     char i, o[6], elo;
     uint8_t num, snr, x, y, sat= 0;
     int azi; //never ever again change this to unsigned or do a cast!!!
@@ -1194,63 +1196,65 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
         lcd_elips(MAX_R * 1.2 * i / 3, MAX_R  * i / 3, CX, CY, 0, n);
 //    for(i= 0; i < 360, i+= 30)
 //        lcd_line(32, 32, i, 32, m);
-/*
-  s= strchr(s, ',') + 1;
-  while(*s){
-  sat++;
-  //s= strchr(s, ',') + 1;
-  num= atoi(s) - 1;
-  nums= s;
-  s= strchr(s, ',') + 1;
-  elo= atoi(s);
-  s= strchr(s, ',') + 1;
-  azi= atoi(s);
-  s= strchr(s, ',') + 1;
-  snr= atoi(s);
-  s= strchr(s, ',') + 1;
-  x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
-  y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
-  y+= CY; //separately because of rounding error
 
-  if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
-  sat_matrix[num][0][0]++;//0 has the current position!
-  if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
-  sat_matrix[num][0][0]= 1; //0 has the current position!
-  sat_matrix[num][sat_matrix[num][0][0]][0]= x;
-  sat_matrix[num][sat_matrix[num][0][0]][1]= y;
-  lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
-  }
+    s= strchr(s, ',') + 1;
+    while(*s){
+        sat++;
+        //s= strchr(s, ',') + 1;
+        num= atoi(s) - 1;
+        nums= s;
+        s= strchr(s, ',') + 1;
+        elo= atoi(s);
+        s= strchr(s, ',') + 1;
+        azi= atoi(s);
+        s= strchr(s, ',') + 1;
+        snr= atoi(s);
+        s= strchr(s, ',') + 1;
+        x= ((elo - 90) * MAX_R / 90. * sin(-azi / 180. * M_PI)) * 1.2 + CX;
+        y=  (elo - 90) * MAX_R / 90. * cos(-azi / 180. * M_PI);
+        y+= CY; //separately because of rounding error
+/*
+        if(sat_matrix[num][sat_matrix[num][0][0]][0] != x || sat_matrix[num][sat_matrix[num][0][0]][1] != y){
+            sat_matrix[num][0][0]++;//0 has the current position!
+            if(sat_matrix[num][0][0] >= MAX_SAT_MAT)
+                sat_matrix[num][0][0]= 1; //0 has the current position!
+            sat_matrix[num][sat_matrix[num][0][0]][0]= x;
+            sat_matrix[num][sat_matrix[num][0][0]][1]= y;
+            lcd_write_str("Trace!", 90, 4, 0, 1, 0, n);
+            }
 */
-//        lcd_set_pixel(x, y, 0, n);
-    for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
-        if(sat_matrix[num][i][0])
-            lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
-        }
-    x= sat_matrix[num][sat_matrix[num][0][0]][0];
-    y= sat_matrix[num][sat_matrix[num][0][0]][1];
-    /*
-      lcd_set_pixel(x - 1, y, 0, n);
-      lcd_set_pixel(x - 1, y + 1, 0, n);
-      lcd_set_pixel(x, y + 1, 0, n);
-    */        
-    lcd_set_pixel(x + 1, y, 0, n);
-    lcd_set_pixel(x - 1, y, 0, n);
-    lcd_set_pixel(x, y + 1, 0, n);
-    lcd_set_pixel(x, y - 1, 0, n);
+        lcd_set_pixel(x, y, 0, n);
+/*
+  for(i= 1; i < MAX_SAT_MAT; i++){ //0 has the current position!
+  if(sat_matrix[num][i][0])
+  lcd_set_pixel(sat_matrix[num][i][0], sat_matrix[num][i][1], 0, n);
+  }
+  x= sat_matrix[num][sat_matrix[num][0][0]][0];
+  y= sat_matrix[num][sat_matrix[num][0][0]][1];
+*/
+        /*
+          lcd_set_pixel(x - 1, y, 0, n);
+          lcd_set_pixel(x - 1, y + 1, 0, n);
+          lcd_set_pixel(x, y + 1, 0, n);
+        */        
+        lcd_set_pixel(x + 1, y, 0, n);
+        lcd_set_pixel(x - 1, y, 0, n);
+        lcd_set_pixel(x, y + 1, 0, n);
+        lcd_set_pixel(x, y - 1, 0, n);
 /*
   lcd_set_pixel(x + 1, y + 1, 1, n);
   lcd_set_pixel(x - 1, y - 1, 1, n);
   lcd_set_pixel(x - 1, y + 1, 1, n);
   lcd_set_pixel(x + 1, y - 1, 1, n);
 */
-    if (!sel || sat == sel){
-        for(i= 5; i >= 0; i--)
-            lcd_set_pixel(x + 7 - i, y, !(num & (1 << i)), n);
-        for(i= 0; i < snr / 2; i++)
-            lcd_set_pixel(x + i + 3, y + 1, 0, n);
-        //lcd_write_str(nums, 90, 6, 0, 1, 0, n);
+        if (!sel || sat == sel){
+            for(i= 5; i >= 0; i--)
+                lcd_set_pixel(x + 7 - i, y, !((num + 1) & (1 << i)), n);
+            for(i= 0; i < snr / 2; i++)
+                lcd_set_pixel(x + i + 3, y + 1, 0, n);
+            //lcd_write_str(nums, 90, 6, 0, 1, 0, n);
+            }
         }
-    
 /*
   for(k= 30; k <=270; k+= 30){
   for(j= 0; j <= 90; j+= 15){
@@ -1281,21 +1285,21 @@ void gps_display_sats(const char* gsv_sats, uint8_t sat_matrix [][MAX_SAT_MAT][2
     }
 
 int main(void){
-    uint8_t j= 0, i, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv, col= 0, closed;
+    uint8_t j= 0, lcd_on= 0, gps_status= 1, gps_status_old= 0, siv, closed;
     uint8_t menu_cnt= 0, menu_sel= 1; //menu stuff
     uint16_t last_lr= 0, send_bytes;
     uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
-    uint8_t * n;//, * o;
-    char gps_str[81], gps_line[81], s[5], c, logit, read_buf;
+    uint8_t * n, read_buf;//, * o;
+    char gps_str[81], gps_line[81], s[5], c, logit;
     char* gps_d[GPS_DATA_MAX], * gps_s;
     char gsv_sats[GSV_MAX];
-    uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
+    //uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
     //char*** gsv_sats;
 
 //    gps_t gps_data= gps_d;
     //gsv_sats= gsv_sat;
     gps_s= gps_str; //bakup of pointer, save is save;)
-
+/*
     for(i= 0; i < MAX_SATS; i++){
         for(j= 1; j < MAX_SAT_MAT; j++){
             sat_matrix[i][j][0]= 0;
@@ -1304,10 +1308,14 @@ int main(void){
         sat_matrix[i][0][0]= 1;
         //sat_matrix[i][j][1]= 0;
         }
+*/
     n= new;
     //o= old;
 
-    DDRB= 0x47; //6;  //0100 0110 //lcd on, SI, CK, SS
+    //DDRB= 0x47; //6;  //0100 0110 //lcd on, SI, CK, SS
+    DDRB= 0x47; //6;  //0100 0111 //lcd on, MOSI, CK, SS
+//never again forget to set SS as an output even if it is not the SS of the lcd
+//otherwise if driven low SPI-master will become a SPI-slave!!!
     DDRE= 0x1C;  //0001 1100 //A0, RST, CS
     
     DDRD= 0x80;  //1000 0000 //gps on
@@ -1389,7 +1397,7 @@ int main(void){
                 j= 0;    
                 //uart0_write_str(gps_s);
                 if(*gps_s == '$'){
-                    gps_status= gps_process(gps_s + 1, gps_d, gsv_sats, &siv, sat_matrix);
+                    gps_status= gps_process(gps_s + 1, gps_d, gsv_sats, &siv);//, sat_matrix);
                     }
                 break;
                 }
@@ -1533,7 +1541,8 @@ int main(void){
                             gps_status_old= gps_status;
                             lcd_clear();//onyl once!
                             }
-                        gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
+                        //gps_display_sats(gsv_sats, sat_matrix, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
+                        gps_display_sats(gsv_sats, siv ? (inc_lr + 5 * (siv + 1)) % (siv + 1) : 0,  n);
                         lcd_iputmchar(itoa(siv, s, 10), 2, 80, 5, 1);
                         break;
                     case NEW_MENU:
