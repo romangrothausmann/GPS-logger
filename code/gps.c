@@ -1291,15 +1291,17 @@ int main(void){
     uint16_t last_lr= 0, send_bytes;
     uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
     uint8_t * n, read_buf;//, * o;
-    char gps_str[81], gps_line[81], s[5], c, logit;
-    char* gps_d[GPS_DATA_MAX], * gps_s;
-    char gsv_sats[GSV_MAX];
+    char gps_s[81], gps_line[81], s[5], c, logit;
+    char* gps_d[GPS_DATA_MAX];
+    char gsv_sats[GSV_MAX];//for concatenating all gsv messages, 469 Bytes
+    struct FindFile ffblk;
+
     //uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
     //char*** gsv_sats;
 
 //    gps_t gps_data= gps_d;
     //gsv_sats= gsv_sat;
-    gps_s= gps_str; //bakup of pointer, save is save;)
+    //gps_s= gps_str; //bakup of pointer, save is save;)
 /*
   for(i= 0; i < MAX_SATS; i++){
   for(j= 1; j < MAX_SAT_MAT; j++){
@@ -1346,7 +1348,7 @@ int main(void){
     PORTD|= (1 << PD7);//switch on gps
     lcd_randomize_matrix(n);
     lcd_write_matrix(n);
-    lcd_write_str("GPS-Logger von RHG\nV11", 0, 3, 0, 0, 0, n);
+    lcd_write_str("GPS-Logger von RHG\nV27", 0, 3, 0, 0, 0, n);
 //    lcd_fw_matrix(n, old);
     clear_matrix(n);
 
@@ -1373,19 +1375,32 @@ Fclose();
 lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
 }
 */
-
-    Fremove("log.txt");
+    fnum= 0;
+    if(Findfirst()!=0){
+        do{
+            if(ffblk.ff_attr==ATTR_FILE){
+                fnum++;
+                //ffblk.ff_name[] enthält den DOS 8.3 Dateinamen
+                //ffblk.ff_longname[] enthält den langen Dateinamen
+                }
+/*
+  if(ffblk.ff_attr==ATTR_DIRECTORY){
+  }
+*/
+            }while(Findnext()!=0);
+        }
+    //Fremove("log.txt");
     logit= 1;
     closed= 0;
-    if(Fopen("log.txt",F_WRITE) != F_OK){
+    itoa(fnum, fname, 10);
+    if(Fopen(fname,F_WRITE) != F_OK){
         lcd_iwrite_str("Can't open file for w!", 0, 5, 1, 1);
         logit= 0;
         closed= 1;
 //        bytecount= 0;
         }
     else
-        lcd_iwrite_str("Opened file for writing!", 0, 5, 1, 1);  
-
+        lcd_iwrite_str(fname, lcd_iwrite_str("Opened file ", 0, 5, 1, 1), 5, 1, 1);  
 
     for(;;){
         gps_status= DONE;
@@ -1444,7 +1459,7 @@ lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
             case CLOSEF:
                 menu_sel= 1;
                 if (closed){
-                    if(Fopen("log.txt",F_WRITE) != F_OK){
+                    if(Fopen(fname,F_WRITE) != F_OK){
                         lcd_iwrite_str("Can't open file for w!", 0, 4, 1, 1);
                         logit= 0;
 //        bytecount= 0;
@@ -1569,8 +1584,8 @@ lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                         break;
                         }
                     break;
-                case LCD:
 /*
+  case LCD:
   if(gps_status == NEW_MENU){
   lcd_iwrite_str("Backlight on/off", 0, 6, 1, 1);
   lcd_on= !lcd_on;
@@ -1579,8 +1594,8 @@ lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
   else
   PORTB|= (1 << PB6);//set backlight on
   }
+  break;
 */
-                    break;
                 case UART:
                     //if(gps_status == BAD_CS)
                     //    lcd_iwrite_str("BAD_CS!", 0, 6, 1, 1);
@@ -1591,30 +1606,41 @@ lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                         uart0_write_str(gps_line);
                         }
                     break;
-                case CLOSEF:
 /*
+  case CLOSEF:
   if(gps_status == NEW_MENU){
 
   Fclose();
   logit= 0;
   lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
   }
+  break;
 */
-                    break;
                 case SENDF:
                     if(gps_status == NEW_MENU){
+                        ftot= 0;
+                        if(Findfirst()){
+                            do{
+                                if(ffblk.ff_attr==ATTR_FILE)
+                                    ftot++;
+                                }while(Findnext());
+                            }
+                        else{
+                             lcd_iwrite_str("No file found!", 0, 5, 1, 1);
+                             break;
+                            }
+                        if(Findfirst()){
+                            fseek= inc_lr % ftot;
+                            for(i= 0; i < fseek; i++)
+                                Findnext();
+                            lcd_iwrite_str(ffblk.ff_name, lcd_iwrite_str("Current file: ", 0, 2, 1, 1), 2, 1, 1); 
+                            }
                         Fclose();
                         logit= 0;
                         closed= 1;
 
-                        if(GetDriveInformation() != F_OK){ // get drive parameters
-                            lcd_iwrite_str("MMC not responding!", 0, 4, 1, 1);
-                            }
-                        else
-                            lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
-
                         lcd_iwrite_str("Stopped logging", 0, 0, 1, 1);
-                        if(Fopen("log.txt",F_READ) != F_OK)
+                        if(Fopen(ffblk.ff_name,F_READ) != F_OK)
                             lcd_iwrite_str("Can't open file for r!", 0, 5, 1, 1);
                         else {
                             lcd_iwrite_str("Writing file to UART0", 0, 1, 1, 1);
