@@ -1,3 +1,4 @@
+//todo: replace pointers against array references for optimization!
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1300,14 +1301,14 @@ int main(void){
     //gsv_sats= gsv_sat;
     gps_s= gps_str; //bakup of pointer, save is save;)
 /*
-    for(i= 0; i < MAX_SATS; i++){
-        for(j= 1; j < MAX_SAT_MAT; j++){
-            sat_matrix[i][j][0]= 0;
-            sat_matrix[i][j][1]= 0;
-            }
-        sat_matrix[i][0][0]= 1;
-        //sat_matrix[i][j][1]= 0;
-        }
+  for(i= 0; i < MAX_SATS; i++){
+  for(j= 1; j < MAX_SAT_MAT; j++){
+  sat_matrix[i][j][0]= 0;
+  sat_matrix[i][j][1]= 0;
+  }
+  sat_matrix[i][0][0]= 1;
+  //sat_matrix[i][j][1]= 0;
+  }
 */
     n= new;
     //o= old;
@@ -1356,21 +1357,21 @@ int main(void){
         lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
 
 /*
-    Fremove("test.txt");//FindName("test.txt");
-    if(Fopen("test.txt",F_WRITE) != F_OK){
-        lcd_iwrite_str("Can't open file for w!", 0, 0, 1, 1);
-        logit= 0;
+  Fremove("test.txt");//FindName("test.txt");
+  if(Fopen("test.txt",F_WRITE) != F_OK){
+  lcd_iwrite_str("Can't open file for w!", 0, 0, 1, 1);
+  logit= 0;
 //        bytecount= 0;
-        }
-    else{
-        char c;
-        lcd_iwrite_str("Opened file for w!", 0, 1, 1, 1);
-        c= Fwrite("Hello World on MMC!\n", 20);
+}
+else{
+char c;
+lcd_iwrite_str("Opened file for w!", 0, 1, 1, 1);
+c= Fwrite("Hello World on MMC!\n", 20);
 //        bytecount= c;
-        c= Fwrite("Hello World on MMC again!\n", 26);
-        Fclose();
-        lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
-        }
+c= Fwrite("Hello World on MMC again!\n", 26);
+Fclose();
+lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
+}
 */
 
     Fremove("log.txt");
@@ -1469,10 +1470,10 @@ int main(void){
             }
 /****This is checked each loop and there for to often
 *****It's now in turn and push checks
-        if (menu_sel){
-            lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
-            lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
-            }
+if (menu_sel){
+lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
+lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
+}
 */
         if (inc_lr != last_lr){//better use a ch_lr if number stays the same?
             if (menu_sel){
@@ -1592,20 +1593,26 @@ int main(void){
                     break;
                 case CLOSEF:
 /*
-                    if(gps_status == NEW_MENU){
+  if(gps_status == NEW_MENU){
 
-                        Fclose();
-                        logit= 0;
-                        lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
-                        }
+  Fclose();
+  logit= 0;
+  lcd_iwrite_str("Closed file, stopped logging", 0, 6, 1, 1);
+  }
 */
                     break;
                 case SENDF:
                     if(gps_status == NEW_MENU){
-
                         Fclose();
                         logit= 0;
                         closed= 1;
+
+                        if(GetDriveInformation() != F_OK){ // get drive parameters
+                            lcd_iwrite_str("MMC not responding!", 0, 4, 1, 1);
+                            }
+                        else
+                            lcd_iwrite_str("MMC responding!", 0, 4, 1, 1);
+
                         lcd_iwrite_str("Stopped logging", 0, 0, 1, 1);
                         if(Fopen("log.txt",F_READ) != F_OK)
                             lcd_iwrite_str("Can't open file for r!", 0, 5, 1, 1);
@@ -1617,7 +1624,7 @@ int main(void){
                                 while (!(UCSR0A & (1<<UDRE0))) {}
                                 UDR0=read_buf;
                                 send_bytes++;
-                                //lcd_iset_byte(1,0,col++,0);
+                                lcd_iset_byte(1,0,send_bytes / 10,0);
                                 }
                             lcd_iwrite_str(" Bytes written!", lcd_iwrite_str(itoa(send_bytes, s, 10), 0, 2, 1, 1), 2, 1, 1);                          
                             }
