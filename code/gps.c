@@ -18,6 +18,7 @@
 #include "fat.h"
 #include "dos.h"
 #include "dir.h"
+#include "find_x.h"
 
 
 #define LCD_SI_PIN  PB2   //only used with manual lcd_write
@@ -101,6 +102,7 @@ volatile uint8_t uart0_byte, uart0_rec, uart1_rec;
 volatile uint16_t u1_ringbuf_index, u1_ringbuf_last_read;
 volatile uint8_t u1_ringbuf[U_RINGBUF_SIZE];
 //volatile unsigned long bytecount;
+
 
 prog_char MenuStrs [8] [15] = { //max 21
     {"Info-Menu"},
@@ -728,6 +730,59 @@ void lcd_elips(uint8_t a, uint8_t b, uint8_t cx, uint8_t cy, char inv,  uint8_t*
 
     }
 */
+
+/* gatopeich's Line Algorithm with integer operations */
+/* http://gatopeichs.pbwiki.com/gatopeich%27s%20Graphic%20Algorithms*/
+
+void lcd_line(int x1, int y1, int x2, int y2, char inv,  uint8_t* m){
+    int dx = x2-x1;
+    if(dx<0) dx = -dx;
+    dx++;
+    int dy = y2-y1;
+    if(dy<0) dy = -dy;
+    dy++;
+
+	if( dx >= dy ) /* Base case: dx >= dy */
+    {
+        if(x1>x2) { /* we want to traverse left-right */
+            int t=x1; x1=x2; x2=t;
+            t=y1; y1=y2; y2=t;
+        }
+        int a = dx;
+        a -= dy/2; /* better symmetry */
+        int y_inc = (y2 >= y1) ? 1 : -1;
+        do {
+            do {
+                lcd_set_pixel(x1, y1, inv, m);
+                a -= dy;
+            } while ( a > 0 );
+            a += dx;
+            if(y1==y2) break;
+            y1 += y_inc;
+        } while(1);
+    }
+    else /* Transposed case: dy > dx */
+    {
+        if(y1>y2) { /* we want to traverse up-down */
+            int t=x1; x1=x2; x2=t;
+            t=y1; y1=y2; y2=t;
+        }
+        int a = dy;
+        a -= dx/2; /* better symmetry */
+        int x_inc = (x2 >= x1) ? 1 : -1;
+        do {
+            do {
+                lcd_set_pixel(x1, y1, inv, m);
+                a -= dx;
+            } while ( a > 0 );
+            a += dy;
+            if(x1==x2) break;
+            x1 += x_inc;
+        } while(1);
+    }
+}
+
+
 void clear_matrix(uint8_t* m){
     uint16_t i;
     
@@ -1291,10 +1346,11 @@ int main(void){
     uint16_t last_lr= 0, send_bytes;
     uint8_t  new[LCD_PIXEL_BYTES];//, old[LCD_PIXEL_BYTES];
     uint8_t * n, read_buf;//, * o;
+    uint8_t fnum, ftot, fseek, i;
+    char fname[13];
     char gps_s[81], gps_line[81], s[5], c, logit;
     char* gps_d[GPS_DATA_MAX];
     char gsv_sats[GSV_MAX];//for concatenating all gsv messages, 469 Bytes
-    struct FindFile ffblk;
 
     //uint8_t sat_matrix[MAX_SATS][MAX_SAT_MAT][2];
     //char*** gsv_sats;
@@ -1431,8 +1487,8 @@ lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
         if (inc_push){
             inc_push= 0;
             menu_sel= !menu_sel; //change menu or other input switch
-            if (menu_sel)
-                inc_lr= menu_cnt + 5 * MENU_MAX; //start at last value
+//            if (menu_sel)
+//                inc_lr= menu_cnt + 5 * MENU_MAX; //start at last value
             lcd_clear();
             gps_status= NEW_MENU;
             /*
@@ -1479,6 +1535,7 @@ lcd_iwrite_str(itoa(c, s, 10), 0, 2, 1, 1);
                 break;
                 }
             if (menu_sel){
+                inc_lr= menu_cnt + 5 * MENU_MAX; //start at last value
                 lcd_iwrite_str(itoa(menu_cnt, s, 10), 0, 6, 0, 1);
                 lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                 }
