@@ -1,4 +1,6 @@
 //todo: replace pointers against array references for optimization!
+//31: added flushing to FAT after each gga-log (VERY IMPORTANT SHOULD BATTERY RUN OUT OR BE DISCONNECTED WITHOUT STOPPING THE LOGGING!!!!!!) (iceland logs lost because this was missing:-(((()
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1404,7 +1406,7 @@ int main(void){
     PORTD|= (1 << PD7);//switch on gps
     lcd_randomize_matrix(n);
     lcd_write_matrix(n);
-    lcd_write_str("GPS-Logger von RHG\nV27", 0, 3, 0, 0, 0, n);
+    lcd_write_str("GPS-Logger von RHG\nV31_130729", 0, 3, 0, 0, 0, n);
 //    lcd_fw_matrix(n, old);
     clear_matrix(n);
 
@@ -1557,8 +1559,10 @@ lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                 }
             last_lr= inc_lr;
             }
-        if(gps_status == NEW_GGA && logit)
+        if(gps_status == NEW_GGA && logit){
             log_gga(gps_d);
+            Fflush(); ///VERY IMPORTANT SHOULD BATTERY RUN OUT OR BE DISCONNECTED!!!!!
+            }
         if(!menu_sel)
             if(gps_status != DONE) {
                 switch(menu_cnt){
