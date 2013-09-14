@@ -6,3 +6,59 @@ file=gps_disp_t09; avr-gcc -O2 -g -mmcu=atmega128 -Wall -Wstrict-prototypes -mca
 uisp  -dprog=stk200 -v=3 --hash=32 --verify --upload if=$file.hex
 
 
+
+
+l@drago:~/coding/avr/c/gps$ 
+
+make
+
+avr-gcc  -mmcu=atmega128 -Wall -gdwarf-2       -DF_CPU=8000000L -Os -fsigned-char -c  gps.c
+avr-gcc -mmcu=atmega128 -Wl,-u,vfprintf gps.o dos.o fat.o mmc_spi.o dir.o find_x.o   -lm  -o gps.elf
+avr-objcopy -O ihex -R .eeprom  gps.elf gps.hex
+avr-objcopy -j .eeprom --set-section-flags=.eeprom="alloc,load" --change-section-lma .eeprom=0 --no-change-warnings -O ihex gps.elf gps.eep || exit 0
+avr-objcopy: there are no sections to be copied!
+
+   text    data     bss     dec     hex filename
+  24872     540     723   26135    6617 gps.elf
+
+
+
+
+- connect dragon avr (unsing ISP, 6-pin end GRN @ pin-1) with gps-logger (6/10-pin end)
+- power on gps-logger as in normal operation
+- run avrdude: 
+
+
+l@drago:~/coding/avr/c/gps$ 
+
+avrdude -p m128 -P usb -c dragon_isp -e -U flash:w:gps.hex
+
+avrdude: AVR device initialized and ready to accept instructions
+
+Reading | ################################################## | 100% 0.17s
+
+avrdude: Device signature = 0x1e9702
+avrdude: erasing chip
+avrdude: reading input file "gps.hex"
+avrdude: input file gps.hex auto detected as Intel Hex
+avrdude: writing flash (25412 bytes):
+
+Writing | ################################################## | 100% 8.49s
+
+avrdude: 25412 bytes of flash written
+avrdude: verifying flash memory against gps.hex:
+avrdude: load data flash data from input file gps.hex:
+avrdude: input file gps.hex auto detected as Intel Hex
+avrdude: input file gps.hex contains 25412 bytes
+avrdude: reading on-chip flash data:
+
+Reading | ################################################## | 100% 8.52s
+
+avrdude: verifying ...
+avrdude: 25412 bytes of flash verified
+
+avrdude: safemode: Fuses OK
+
+avrdude done.  Thank you.
+
+
