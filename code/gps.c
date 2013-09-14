@@ -1,5 +1,6 @@
 //todo: replace pointers against array references for optimization!
 //31: added flushing to FAT after each gga-log (VERY IMPORTANT SHOULD BATTERY RUN OUT OR BE DISCONNECTED WITHOUT STOPPING THE LOGGING!!!!!!) (iceland logs lost because this was missing:-(((()
+//32: added parsing of RMC-record for date, direction and speed
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,7 +72,10 @@
 #define MNO   11 //GSV message number
 #define SIV   12 //GSV number of sats in view
 //#define 
-#define GPS_DATA_MAX 13
+#define DATE  13
+#define SPEED 14
+#define DIREC 15
+#define GPS_DATA_MAX 16
 
 #define GSV_MAX 469 //",nn,ee,aaa,ss"=13: x36 + 1 = 469; 31 sats now, changing
 
@@ -117,7 +121,8 @@ prog_char MenuStrs [8] [15] = { //max 21
     {"Light on/off"},
     };
 
-void display_gga(gps_t gps_data); 
+//void display_gga(gps_t gps_data); 
+void display_gga_rmc(gps_t gps_data); 
 void zero_gps_data(char* s);
 
 /*#######nice function but probably not optimizeable!!!#########
@@ -971,6 +976,8 @@ void gps_display_gsv(char* sivs, char* const gsv_sats, uint8_t tsat) {
     }
 
 void gps_process_gga(char* const o, gps_t gps_data){
+    /* $GPGGA,HHMMSS.ss,BBBB.BBBB,b,LLLLL.LLLL,l,Q,NN,D.D,H.H,h,G.G,g,A.A,RRRR*PP */
+
     char* s;
 
     s= o; //keep original pointer unchanged!
@@ -979,12 +986,31 @@ void gps_process_gga(char* const o, gps_t gps_data){
     s= gps_data[LAT2]= strchr(s, ',') + 1;
     s= gps_data[LON1]= strchr(s, ',') + 1;
     s= gps_data[LON2]= strchr(s, ',') + 1;
-    s= gps_data[FIX]= strchr(s, ',') + 1;
+    s= gps_data[FIX]= strchr(s, ',') + 1; //Q: GPS-Qualität: 0 für ungültig, 1 für GPS fix, 2 für DGPS fix, 6 für geschätzt (nur bei NMEA-0183 ab Version 2.3)
     s= gps_data[NSAT]= strchr(s, ',') + 1;
-    s= gps_data[HDOP]= strchr(s, ',') + 1;
-    s= gps_data[GEOID]= strchr(s, ',') + 1;
-    s++; //skip M
-    s= gps_data[WGS84]= strchr(s, ',') + 1;
+    s= gps_data[HDOP]= strchr(s, ',') + 1;//D.D: horizontale Abweichung (dilution of precision)
+    s= gps_data[GEOID]= strchr(s, ',') + 1;//H.H: Höhe der Antenne über Geoid oder MSL (mean sea level)
+    s++; //skip //h: Einheit der Antennenhöhe (Meter)
+    s= gps_data[WGS84]= strchr(s, ',') + 1;//G.G: geoidal separation
+    }
+
+void gps_process_rmc(char* const o, gps_t gps_data){
+    /* $GPRMC,162614,A,5230.5900,N,01322.3900,E,10.0,90.0,131006,1.2,E,A*13 */
+    /* $GPRMC,HHMMSS,A,BBBB.BBBB,b,LLLLL.LLLL,l,GG.G,RR.R,DDMMYY,M.M,m,F*PP */
+
+    char* s;
+
+    s= o; //keep original pointer unchanged!
+    s= strchr(s, ',') + 1;//skip HHMMSS
+    s= strchr(s, ',') + 1;//skip A
+    s= strchr(s, ',') + 1;//skip LAT
+    s= strchr(s, ',') + 1;//skip N|S
+    s= strchr(s, ',') + 1;//skip LON
+    s= strchr(s, ',') + 1;//skip E|W
+    s= gps_data[SPEED]= strchr(s, ',') + 1;
+    s= gps_data[DIREC]= strchr(s, ',') + 1;
+    s= gps_data[DATE]= strchr(s, ',') + 1;
+    //disgard rest of record
     }
 
 char gps_det_type(char* s, char* t){
@@ -1010,6 +1036,32 @@ void display_time(char* time, uint8_t col, uint8_t page){
     col= lcd_iputchar(*s++, col, page, 0);
     col= lcd_iputchar(*s++, col, page, 0);
     //skip fraction of s
+    }
+
+void display_date(char* date, uint8_t col, uint8_t page){
+    char* s;
+
+    s= date;
+    //col= lcd_iwrite_str(s, col, page, 0, 1);
+    col= lcd_iputchar(s[4], col, page, 0);
+    col= lcd_iputchar(s[5], col, page, 0);
+    col= lcd_iputchar('.', col, page, 0);
+    col= lcd_iputchar(s[2], col, page, 0);
+    col= lcd_iputchar(s[3], col, page, 0);
+    col= lcd_iputchar('.', col, page, 0);
+    col= lcd_iputchar(s[0], col, page, 0);
+    col= lcd_iputchar(s[1], col, page, 0);
+    //skip fraction of s
+    }
+
+void display_speed(const char* s, uint8_t col, const uint8_t page){
+
+    lcd_iwrite_str(s, col, page, 0, 2);
+    }
+
+void display_direction(const char* s, uint8_t col, const uint8_t page){
+
+    lcd_iwrite_str(s, col, page, 0, 2);
     }
 
 void display_lat(const char* lat1, const char* lat2, uint8_t col, const uint8_t page){
@@ -1079,17 +1131,38 @@ void display_geoid(const char* s, const uint8_t col, const uint8_t page){
     lcd_iwrite_str(s, col, page, 0, 1);
     }
 
-void display_gga(gps_t gps_data){
+/* void display_gga(gps_t gps_data){ */
+/*     if(*gps_data[TIME]) */
+/*         display_time(gps_data[TIME], 0, 0); */
+/*     if(*gps_data[LAT1] && *gps_data[LAT2]) */
+/*         display_lat(gps_data[LAT1], gps_data[LAT2], 0, 1); */
+/*     if(*gps_data[LON1] && *gps_data[LON2]) */
+/*         display_lon(gps_data[LON1], gps_data[LON2], 0, 2); */
+/*     if(*gps_data[NSAT]) */
+/*         display_nsat(gps_data[NSAT], 10 * FONT_WIDTH, 0); */
+/*     if(*gps_data[GEOID]) */
+/*         display_geoid(gps_data[GEOID], 13 * FONT_WIDTH, 0); */
+/*        } */
+
+void display_gga_rmc(gps_t gps_data){
     if(*gps_data[TIME])
         display_time(gps_data[TIME], 0, 0);
+    if(*gps_data[DATE])
+        display_date(gps_data[DATE], 9 * FONT_WIDTH, 0);
+    if(*gps_data[NSAT])
+        display_nsat(gps_data[NSAT], 18 * FONT_WIDTH, 0);
+    //if(*gps_data[GEOID])
+    //    display_geoid(gps_data[GEOID], 21 * FONT_WIDTH, 0);
     if(*gps_data[LAT1] && *gps_data[LAT2])
         display_lat(gps_data[LAT1], gps_data[LAT2], 0, 1);
     if(*gps_data[LON1] && *gps_data[LON2])
         display_lon(gps_data[LON1], gps_data[LON2], 0, 2);
-    if(*gps_data[NSAT])
-        display_nsat(gps_data[NSAT], 10 * FONT_WIDTH, 0);
+    if(*gps_data[SPEED])
+        display_speed(gps_data[SPEED], 0, 3);
+    if(*gps_data[DIREC])
+        display_direction(gps_data[DIREC], 4 * FONT_WIDTH, 3);
     if(*gps_data[GEOID])
-        display_geoid(gps_data[GEOID], 13 * FONT_WIDTH, 0);
+        display_geoid(gps_data[GEOID], 0, 4);
        }
 
 void write_str(char* s, char c){
@@ -1160,6 +1233,26 @@ void log_gga(gps_t gps_data){
         tmp[8]= 0;
         write_str(tmp, ' ');
         }
+    if(*gps_data[DATE]){
+        s= gps_data[DATE];
+        ////DD.MM.YY
+        /* tmp[0]= s[4]; */
+        /* tmp[1]= s[5]; */
+        /* tmp[2]= '.'; */
+        /* tmp[3]= s[2]; */
+        /* tmp[4]= s[3]; */
+        /* tmp[5]= '.'; */
+        /* tmp[6]= s[0]; */
+        /* tmp[7]= s[1]; */
+        /* tmp[8]= 0; */
+        /* write_str(tmp, ' '); */
+        ////YYMMDD
+        write_str(s, ' ');
+        }
+    if(*gps_data[SPEED])
+        write_str(gps_data[SPEED], ' ');
+    if(*gps_data[DIREC])
+        write_str(gps_data[DIREC], ' ');
     if(*gps_data[NSAT])
         //lcd_iwrite_str(gps_data[NSAT], 0, 4, 0, 0);
         write_str(gps_data[NSAT], '\n');
@@ -1189,17 +1282,19 @@ uint8_t gps_process(char* const s, gps_t gps_data, char* gsv_sats, uint8_t* cons
         zero_gps_data(s); //this truncates s!!!!
         return(NEW_GGA);
         }
-    if(gps_det_type(s, "GPGSV")){ 
+    if(gps_det_type(s, "GPGSV")){ //list of visible satalites
         if((*siv= gps_process_gsv(s, gps_data, gsv_sats)))//, sat_matrix)))
             return(NEW_GSV);
         //else
         //    return(GSV_UNF);
         }
-/*    else if(!strncmp(s, "GPRMC", 5))
-        gps_process_rmc(s);
-    else if(!strncmp(s, "GPGSA", 5))
-        gps_process_gsa(s);
-*/
+    if(gps_det_type(s, "GPRMC")){ //Recommended Minimum Sentence C, date, speed, direction
+        gps_process_rmc(s, gps_data);
+        return(NEW_RMC);
+        }
+    /* else if(!strncmp(s, "GPGSA", 5)) */
+    /*     gps_process_gsa(s); */
+
     return(ERROR);
     }
 
@@ -1574,7 +1669,8 @@ lcd_iwrite_strp(MenuStrs[menu_cnt], 0, 7, 0, 1);
                             gps_status_old= gps_status;
                             lcd_clear();//yields flickering
                             }
-                        display_gga(gps_d);
+                        //display_gga(gps_d);
+                        display_gga_rmc(gps_d);
                         break;
                     case NEW_MENU:
                         //case WAITING:
