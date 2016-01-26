@@ -18,4 +18,22 @@ Software from the [gEDA project](http://www.geda-project.org/) was used to creat
 
 ## Images
 
-<img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135">
+
+fotos:
+
+<img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135"> <img src="IMGs/screen_start.jpg" width="278">
+
+
+schematics:
+
+<img src="IMGs/schematics.png" width="400">
+
+
+pcb layout:
+
+<img src="IMGs/pcb_front.png" width="200"> <img src="IMGs/pcb_back.png" width="200">
+
+
+screen shots of the 7 display-modes (satelite view and satelite list):
+
+<img src="IMGs/screen_satelite-view_bl.jpg" width="200"> <img src="IMGs/screen_satelite-list_bl.jpg" width="200">
