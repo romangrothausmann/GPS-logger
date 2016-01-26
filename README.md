@@ -18,5 +18,4 @@ Software from the [gEDA project](http://www.geda-project.org/) was used to creat
 
 ## Images
 
-![front](IMGs/front.jpg) ![back](IMGs/back.jpg)
-
+<img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135">
