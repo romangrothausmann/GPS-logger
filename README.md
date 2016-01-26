@@ -2,7 +2,7 @@
 GPS-logger project (based on university course: "EDA, PCB and AVR-Microcontroller")
 
 
-## structure
+## Structure
 
 - `PCB/`   schematics of the electronic circuits (`*.sch`) as well as the PCB layouts (`*.pcb`)
   - `PCB/gschem-sym/`   symbols for gschem (referenced from PCB/gafrc)
@@ -14,4 +14,9 @@ GPS-logger project (based on university course: "EDA, PCB and AVR-Microcontrolle
 Software from the [gEDA project](http://www.geda-project.org/) was used to create the PCB:
 - [gschem](http://wiki.geda-project.org/geda:gaf) for the schematics (`*.sch`)
 - [PCB](http://pcb.geda-project.org/) for the layouts  (`*.pcb`)
+
+
+## Images
+
+![front](IMGs/front.jpg) ![back](IMGs/back.jpg)
 
