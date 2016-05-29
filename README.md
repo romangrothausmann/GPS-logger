@@ -24,7 +24,7 @@ fotos:
 <img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135"> <img src="IMGs/screen_start.jpg" width="278">
 
 
-schematics (also as [SVG](IMGs/schematics.svg)):
+schematics (also as [PDF](IMGs/schematics.pdf)):
 
 <img src="IMGs/schematics.png" width="400">
 
