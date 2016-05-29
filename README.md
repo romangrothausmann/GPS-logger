@@ -1,4 +1,7 @@
 # GPS-logger
+
+<img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135"> <img src="IMGs/schematics.png" width="215"> <img src="IMGs/pcb_front.png" width="120"> <img src="IMGs/pcb_back.png" width="132">
+
 GPS-logger project (based on university course: "EDA, PCB and AVR-Microcontroller")
 
 
