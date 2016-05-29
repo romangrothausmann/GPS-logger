@@ -24,14 +24,14 @@ fotos:
 <img src="IMGs/front.jpg" width="200"> <img src="IMGs/back.jpg" width="135"> <img src="IMGs/screen_start.jpg" width="278">
 
 
-schematics:
+schematics (also as [SVG](IMGs/schematics.svg)):
 
 <img src="IMGs/schematics.png" width="400">
 
 
-pcb layout:
+pcb layout ([SVGs](IMGs/)):
 
-<img src="IMGs/pcb_front.png" width="200"> <img src="IMGs/pcb_back.png" width="200">
+<img src="IMGs/pcb_front.png" width="200"> <img src="IMGs/pcb_back.png" width="220">
 
 
 screen shots of the 7 display-modes (satelite view and satelite list):
