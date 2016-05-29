@@ -36,11 +36,11 @@ gps_sch.pdf gps_sch.svg : gps.sch
 	convert -trim -rotate -90 $<[09] $@ # http://imagemagick.org/discourse-server/viewtopic.php?t=16565
 
 %-front.pdf: %.pdf
-	ps2pdf -dFirstPage=10 -dLastPage=10 $< $@
+	pdftk A=$< cat A11east output $@
 	inkscape $@ --export-pdf=$@ --export-area-drawing
 
 %-back.pdf: %.pdf
-	ps2pdf -dFirstPage=11 -dLastPage=11 $< $@
+	pdftk A=$< cat A10west output $@
 	inkscape $@ --export-pdf=$@ --export-area-drawing
 
 %.svg : %.pdf # http://www.imagemagick.org/discourse-server/viewtopic.php?t=6458
